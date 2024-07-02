@@ -8,6 +8,7 @@
 
 #include "engine.hpp"
 #include "vulkan_validation.hpp"
+#include "vulkan_helper.hpp"
 
 Engine::Engine()
 {
@@ -19,6 +20,7 @@ void Engine::Init(const InitInfo& initInfo)
     CreateInstance(initInfo);
     SetupDebugMessenger();
     PickPhysicalDevice();
+    CreateDevice();
 }
 
 void Engine::Run()
@@ -30,9 +32,6 @@ void Engine::Shutdown()
 {
     if(_enableValidationLayers)
         util::DestroyDebugUtilsMessengerEXT(_instance, _debugMessenger, nullptr);
-
-    _physicalDevice = VK_NULL_HANDLE;
-    vkDestroyInstance(_instance, nullptr);
 }
 
 void Engine::CreateInstance(const InitInfo& initInfo)
@@ -40,31 +39,24 @@ void Engine::CreateInstance(const InitInfo& initInfo)
     if(_enableValidationLayers && !CheckValidationLayerSupport())
         throw std::runtime_error("Validation layers requested, but not supported!");
 
-    VkApplicationInfo appInfo{};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "No engine";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_MAKE_VERSION(1, 0, 0);
-
-    VkInstanceCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
+    vk::ApplicationInfo appInfo{ "", vk::makeApiVersion(0, 0, 0, 0), "No engine", vk::makeApiVersion(0, 1, 0, 0), vk::makeApiVersion(0, 1, 0, 0) };
 
     auto extensions = GetRequiredExtensions(initInfo);
-    createInfo.enabledExtensionCount = extensions.size();
-    createInfo.ppEnabledExtensionNames = extensions.data();
-    createInfo.enabledLayerCount = 0;
+    vk::InstanceCreateInfo createInfo{
+        vk::InstanceCreateFlags{},
+        &appInfo,
+        static_cast<uint32_t>(_validationLayers.size()), _validationLayers.data(),
+        static_cast<uint32_t>(extensions.size()), extensions.data()
+    };
 
-    VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
+    vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
     if(_enableValidationLayers)
     {
         createInfo.enabledLayerCount = _validationLayers.size();
         createInfo.ppEnabledLayerNames = _validationLayers.data();
 
         util::PopulateDebugMessengerCreateInfo(debugCreateInfo);
-        createInfo.pNext = static_cast<VkDebugUtilsMessengerCreateInfoEXT*>(&debugCreateInfo);
+        createInfo.pNext = static_cast<vk::DebugUtilsMessengerCreateInfoEXT*>(&debugCreateInfo);
     }
     else
     {
@@ -72,18 +64,16 @@ void Engine::CreateInstance(const InitInfo& initInfo)
         createInfo.pNext = nullptr;
     }
 
-    VkResult result = vkCreateInstance(&createInfo, nullptr, &_instance);
-    if(result != VK_SUCCESS)
-        throw std::runtime_error("Failed to create vk instance!");
+    util::VK_ASSERT(vk::createInstance(&createInfo, nullptr, &_instance), "Failed to create vk instance!");
 }
 
 bool Engine::CheckValidationLayerSupport()
 {
     uint32_t layerCount{};
-    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+    util::VK_ASSERT(vk::enumerateInstanceLayerProperties(&layerCount, nullptr), "Failed to enumerate instance layer properties!");
 
-    std::vector<VkLayerProperties> availableLayers(layerCount);
-    vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+    std::vector<vk::LayerProperties> availableLayers(layerCount);
+    util::VK_ASSERT(vk::enumerateInstanceLayerProperties(&layerCount, availableLayers.data()), "Failed to enumerate instance layer properties!");
 
     bool result = std::all_of(_validationLayers.begin(), _validationLayers.end(), [&availableLayers](const auto& layerName)
     {
@@ -98,10 +88,10 @@ bool Engine::CheckValidationLayerSupport()
 void Engine::LogInstanceExtensions()
 {
     uint32_t extensionCount{ 0 };
-    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+    util::VK_ASSERT(vk::enumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr), "Failed to enumerate instance extension properties!");
 
-    std::vector<VkExtensionProperties> extensions(extensionCount);
-    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
+    std::vector<vk::ExtensionProperties> extensions(extensionCount);
+    util::VK_ASSERT(vk::enumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data()), "Failed to enumerate instance extension properties!");
     std::cout << "Available extensions: \n";
     for(const auto& extension : extensions)
     {
@@ -113,7 +103,7 @@ std::vector<const char*> Engine::GetRequiredExtensions(const InitInfo& initInfo)
 {
     std::vector<const char*> extensions(initInfo.extensions, initInfo.extensions + initInfo.extensionCount);
     if(_enableValidationLayers)
-        extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        extensions.emplace_back(vk::EXTDebugUtilsExtensionName);
 
     return extensions;
 }
@@ -123,31 +113,29 @@ void Engine::SetupDebugMessenger()
     if(!_enableValidationLayers)
         return;
 
-    VkDebugUtilsMessengerCreateInfoEXT createInfo{};
+    vk::DebugUtilsMessengerCreateInfoEXT createInfo{};
     util::PopulateDebugMessengerCreateInfo(createInfo);
     createInfo.pUserData = nullptr;
 
-    VkResult result = util::CreateDebugUtilsMessengerEXT(_instance, &createInfo, nullptr, &_debugMessenger);
-    if(result != VK_SUCCESS)
-        throw std::runtime_error("Failed to create debug messenger!");
+    util::VK_ASSERT(util::CreateDebugUtilsMessengerEXT(_instance, &createInfo, nullptr, &_debugMessenger), "Failed to create debug messenger!");
 }
 
 void Engine::PickPhysicalDevice()
 {
     uint32_t deviceCount{0};
-    vkEnumeratePhysicalDevices(_instance, &deviceCount, nullptr);
+    util::VK_ASSERT(_instance.enumeratePhysicalDevices(&deviceCount, nullptr), "Failed to enumerate physical devices!");
 
     if(deviceCount == 0)
         throw std::runtime_error("No GPU's with Vulkan support available!");
 
-    std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(_instance, &deviceCount, devices.data());
+    std::vector<vk::PhysicalDevice> devices(deviceCount);
+    util::VK_ASSERT(_instance.enumeratePhysicalDevices(&deviceCount, devices.data()), "Failed to enumerate physical devices!");
 
-    std::multimap<int, VkPhysicalDevice> candidates{};
+    std::multimap<int, vk::PhysicalDevice> candidates{};
 
     for(const auto& device : devices)
     {
-        int32_t score = RateDeviceSuitability(device);
+        uint32_t score = RateDeviceSuitability(device);
         if(score > 0)
             candidates.emplace(score, device);
     }
@@ -157,16 +145,16 @@ void Engine::PickPhysicalDevice()
     _physicalDevice = candidates.rbegin()->second;
 }
 
-int32_t Engine::RateDeviceSuitability(const VkPhysicalDevice& device)
+uint32_t Engine::RateDeviceSuitability(const vk::PhysicalDevice& device)
 {
-    VkPhysicalDeviceProperties deviceProperties;
-    VkPhysicalDeviceFeatures deviceFeatures;
-    vkGetPhysicalDeviceProperties(device, &deviceProperties);
-    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+    vk::PhysicalDeviceProperties deviceProperties;
+    vk::PhysicalDeviceFeatures deviceFeatures;
+    device.getProperties(&deviceProperties);
+    device.getFeatures(&deviceFeatures);
 
     QueueFamilyIndices familyIndices = FindQueueFamilies(device);
 
-    int32_t score{0};
+    uint32_t score{0};
 
     // Failed if geometry shader is not supported.
     if(!deviceFeatures.geometryShader)
@@ -177,7 +165,7 @@ int32_t Engine::RateDeviceSuitability(const VkPhysicalDevice& device)
         return 0;
 
     // Favor integrated GPUs above all else.
-    if(deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+    if(deviceProperties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
         score += 10000;
 
     score += deviceProperties.limits.maxImageDimension2D;
@@ -185,19 +173,19 @@ int32_t Engine::RateDeviceSuitability(const VkPhysicalDevice& device)
     return score;
 }
 
-Engine::QueueFamilyIndices Engine::FindQueueFamilies(VkPhysicalDevice const& device)
+Engine::QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const& device)
 {
     QueueFamilyIndices indices{};
 
     uint32_t queueFamilyCount{0};
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+    device.getQueueFamilyProperties(&queueFamilyCount, nullptr);
 
-    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+    std::vector<vk::QueueFamilyProperties> queueFamilies(queueFamilyCount);
+    device.getQueueFamilyProperties(&queueFamilyCount, queueFamilies.data());
 
     for(size_t i = 0; i < queueFamilies.size(); ++i)
     {
-        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        if (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
             indices.graphicsFamily = i;
 
         if(indices.IsComplete())
@@ -205,4 +193,36 @@ Engine::QueueFamilyIndices Engine::FindQueueFamilies(VkPhysicalDevice const& dev
     }
 
     return indices;
+}
+
+void Engine::CreateDevice()
+{
+    QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
+    vk::PhysicalDeviceFeatures deviceFeatures;
+    _physicalDevice.getFeatures(&deviceFeatures);
+
+    float queuePriority{ 1.0f };
+    vk::DeviceQueueCreateInfo queueCreateInfo{};
+    queueCreateInfo.queueFamilyIndex = familyIndices.graphicsFamily.value();
+    queueCreateInfo.queueCount = 1;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+
+    vk::DeviceCreateInfo createInfo{};
+    createInfo.pQueueCreateInfos = &queueCreateInfo;
+    createInfo.queueCreateInfoCount = 1;
+    createInfo.pEnabledFeatures = &deviceFeatures;
+    createInfo.enabledExtensionCount = 0;
+    if(_enableValidationLayers)
+    {
+        createInfo.enabledLayerCount = static_cast<uint32_t>(_validationLayers.size());
+        createInfo.ppEnabledLayerNames = _validationLayers.data();
+    }
+    else
+    {
+        createInfo.enabledLayerCount = 0;
+    }
+
+    util::VK_ASSERT(_physicalDevice.createDevice(&createInfo, nullptr, &_device), "Failed creating a logical device!");
+
+    _device.getQueue(familyIndices.graphicsFamily.value(), 0, &_graphicsQueue);
 }

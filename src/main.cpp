@@ -5,7 +5,6 @@
 #endif
 
 #include <memory>
-#include <vulkan/vulkan.h>
 #include <iostream>
 #include "engine.hpp"
 

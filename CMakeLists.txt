@@ -12,6 +12,8 @@ include_directories(external)
 include_directories(external/glm)
 add_subdirectory(external/glm)
 
+add_subdirectory(external/magic_enum)
+
 find_package(Vulkan)
 
 if(WIN32)
@@ -84,5 +86,6 @@ list(REMOVE_DUPLICATES SOURCE_FILES)
 # Create executable
 add_executable(pi_vulkan ${SOURCE_FILES})
 
+target_link_libraries(pi_vulkan PRIVATE magic_enum::magic_enum)
 target_include_directories(pi_vulkan PUBLIC include)
 
