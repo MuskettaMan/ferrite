@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
+#include <map>
 
 #include "engine.hpp"
 #include "vulkan_validation.hpp"
@@ -133,6 +134,75 @@ void Engine::SetupDebugMessenger()
 
 void Engine::PickPhysicalDevice()
 {
+    uint32_t deviceCount{0};
+    vkEnumeratePhysicalDevices(_instance, &deviceCount, nullptr);
 
+    if(deviceCount == 0)
+        throw std::runtime_error("No GPU's with Vulkan support available!");
 
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(_instance, &deviceCount, devices.data());
+
+    std::multimap<int, VkPhysicalDevice> candidates{};
+
+    for(const auto& device : devices)
+    {
+        int32_t score = RateDeviceSuitability(device);
+        if(score > 0)
+            candidates.emplace(score, device);
+    }
+    if(candidates.empty())
+        throw std::runtime_error("Failed finding suitable device!");
+
+    _physicalDevice = candidates.rbegin()->second;
+}
+
+int32_t Engine::RateDeviceSuitability(const VkPhysicalDevice& device)
+{
+    VkPhysicalDeviceProperties deviceProperties;
+    VkPhysicalDeviceFeatures deviceFeatures;
+    vkGetPhysicalDeviceProperties(device, &deviceProperties);
+    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+    QueueFamilyIndices familyIndices = FindQueueFamilies(device);
+
+    int32_t score{0};
+
+    // Failed if geometry shader is not supported.
+    if(!deviceFeatures.geometryShader)
+        return 0;
+
+    // Failed if graphics family queue is not supported.
+    if(!familyIndices.IsComplete())
+        return 0;
+
+    // Favor integrated GPUs above all else.
+    if(deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+        score += 10000;
+
+    score += deviceProperties.limits.maxImageDimension2D;
+
+    return score;
+}
+
+Engine::QueueFamilyIndices Engine::FindQueueFamilies(VkPhysicalDevice const& device)
+{
+    QueueFamilyIndices indices{};
+
+    uint32_t queueFamilyCount{0};
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+    for(size_t i = 0; i < queueFamilies.size(); ++i)
+    {
+        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            indices.graphicsFamily = i;
+
+        if(indices.IsComplete())
+            break;
+    }
+
+    return indices;
 }
