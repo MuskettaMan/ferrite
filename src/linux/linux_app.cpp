@@ -85,10 +85,15 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
 
     std::vector<const char*> extensions{};
     extensions.emplace_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+    extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
+
 
     Engine::InitInfo initInfo{};
     initInfo.extensions = extensions.data();
     initInfo.extensionCount = extensions.size();
+
+    initInfo.width = _width;
+    initInfo.height = _height;
 
     initInfo.retrieveSurface = [this](vk::Instance instance) {
         VkXcbSurfaceCreateInfoKHR createInfo{};

@@ -32,6 +32,8 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
     const char** glfwExtensions{ glfwGetRequiredInstanceExtensions(&glfwExtensionCount) };
 
     Engine::InitInfo initInfo{ glfwExtensionCount, glfwExtensions };
+    initInfo.width = _width;
+    initInfo.height = _height;
     initInfo.retrieveSurface = [this](vk::Instance instance) {
         VkSurfaceKHR surface;
         util::VK_ASSERT(glfwCreateWindowSurface(instance, this->_window, nullptr, &surface), "Failed creating GLFW surface!");

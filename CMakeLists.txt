@@ -70,10 +70,8 @@ file(GLOB_RECURSE SOURCE_FILES_LINUX ${PROJECT_SOURCE_DIR}/src/linux/*.cpp)
 
 # Append platform-specific source files
 if(WIN32)
-    message("remove linux files")
     list(REMOVE_ITEM SOURCE_FILES ${SOURCE_FILES_LINUX})
 elseif(LINUX)
-    message("remove win files")
     list(REMOVE_ITEM SOURCE_FILES ${SOURCE_FILES_WIN32})
 endif()
 
@@ -88,4 +86,5 @@ add_executable(pi_vulkan ${SOURCE_FILES})
 
 target_link_libraries(pi_vulkan PRIVATE magic_enum::magic_enum)
 target_include_directories(pi_vulkan PUBLIC include)
+target_compile_options(pi_vulkan PRIVATE -fexceptions -frtti)
 
