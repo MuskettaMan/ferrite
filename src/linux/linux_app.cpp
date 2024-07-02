@@ -1,9 +1,13 @@
 #include "linux/linux_app.hpp"
+
 #include <chrono>
 #include <cstring>
 #include <cassert>
-#include "engine.hpp"
+#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_xcb.h>
 
+#include "engine.hpp"
+#include "vulkan_helper.hpp"
 
 static inline xcb_intern_atom_reply_t* intern_atom_helper(xcb_connection_t* conn, bool only_if_exists, const char* str)
 {
@@ -80,11 +84,22 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
     xcb_flush(_connection);
 
     std::vector<const char*> extensions{};
-    extensions.emplace_back("VK_KHR_xcb_surface");
+    extensions.emplace_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
 
     Engine::InitInfo initInfo{};
     initInfo.extensions = extensions.data();
     initInfo.extensionCount = extensions.size();
+
+    initInfo.retrieveSurface = [this](vk::Instance instance) {
+        VkXcbSurfaceCreateInfoKHR createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR;
+        createInfo.connection = this->_connection;
+        createInfo.window = this->_window;
+        VkSurfaceKHR surface;
+        util::VK_ASSERT(vkCreateXcbSurfaceKHR(static_cast<VkInstance>(instance), &createInfo, nullptr, &surface), "Failed creating XCB surface!");
+
+        return vk::SurfaceKHR{ surface };
+    };
 
     _engine->Init(initInfo);
 }

@@ -1,6 +1,7 @@
 #include "win/win_app.hpp"
 #include "engine.hpp"
 #include "GLFW/glfw3.h"
+#include "vulkan_helper.hpp"
 
 WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
 {
@@ -31,6 +32,11 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
     const char** glfwExtensions{ glfwGetRequiredInstanceExtensions(&glfwExtensionCount) };
 
     Engine::InitInfo initInfo{ glfwExtensionCount, glfwExtensions };
+    initInfo.retrieveSurface = [this](vk::Instance instance) {
+        VkSurfaceKHR surface;
+        util::VK_ASSERT(glfwCreateWindowSurface(instance, this->_window, nullptr, &surface), "Failed creating GLFW surface!");
+        return vk::SurfaceKHR(surface);
+    };
 
     _engine->Init(initInfo);
 }

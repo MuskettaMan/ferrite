@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <set>
 
 #include "engine.hpp"
 #include "vulkan_validation.hpp"
@@ -19,6 +20,9 @@ void Engine::Init(const InitInfo& initInfo)
 {
     CreateInstance(initInfo);
     SetupDebugMessenger();
+
+    _surface = initInfo.retrieveSurface(_instance);
+
     PickPhysicalDevice();
     CreateDevice();
 }
@@ -32,6 +36,11 @@ void Engine::Shutdown()
 {
     if(_enableValidationLayers)
         util::DestroyDebugUtilsMessengerEXT(_instance, _debugMessenger, nullptr);
+
+    // TODO: Find nicer way to destroy surface.
+    vkDestroySurfaceKHR(_instance, _surface, nullptr);
+    _device.destroy();
+    _instance.destroy();
 }
 
 void Engine::CreateInstance(const InitInfo& initInfo)
@@ -188,6 +197,11 @@ Engine::QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const& d
         if (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
             indices.graphicsFamily = i;
 
+        vk::Bool32 supported;
+        util::VK_ASSERT(device.getSurfaceSupportKHR(i, _surface, &supported), "Failed querying surface support on physical device!");
+        if(supported)
+            indices.presentFamily = i;
+
         if(indices.IsComplete())
             break;
     }
@@ -201,15 +215,16 @@ void Engine::CreateDevice()
     vk::PhysicalDeviceFeatures deviceFeatures;
     _physicalDevice.getFeatures(&deviceFeatures);
 
+    std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos{};
+    std::set<uint32_t> uniqueQueueFamilies = { familyIndices.graphicsFamily.value(), familyIndices.presentFamily.value() };
     float queuePriority{ 1.0f };
-    vk::DeviceQueueCreateInfo queueCreateInfo{};
-    queueCreateInfo.queueFamilyIndex = familyIndices.graphicsFamily.value();
-    queueCreateInfo.queueCount = 1;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+
+    for(uint32_t familyQueueIndex : uniqueQueueFamilies)
+        queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags{}, familyQueueIndex, 1, &queuePriority);
 
     vk::DeviceCreateInfo createInfo{};
-    createInfo.pQueueCreateInfos = &queueCreateInfo;
-    createInfo.queueCreateInfoCount = 1;
+    createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+    createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
     createInfo.enabledExtensionCount = 0;
     if(_enableValidationLayers)
@@ -225,4 +240,5 @@ void Engine::CreateDevice()
     util::VK_ASSERT(_physicalDevice.createDevice(&createInfo, nullptr, &_device), "Failed creating a logical device!");
 
     _device.getQueue(familyIndices.graphicsFamily.value(), 0, &_graphicsQueue);
+    _device.getQueue(familyIndices.presentFamily.value(), 0, &_presentQueue);
 }
