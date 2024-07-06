@@ -2,6 +2,7 @@
 #include "engine.hpp"
 #include "GLFW/glfw3.h"
 #include "vulkan_helper.hpp"
+#include "imgui/backends/win/imgui_impl_glfw.h"
 
 WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
 {
@@ -39,6 +40,11 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
         util::VK_ASSERT(glfwCreateWindowSurface(instance, this->_window, nullptr, &surface), "Failed creating GLFW surface!");
         return vk::SurfaceKHR(surface);
     };
+    initInfo.newImGuiFrame = [](){ ImGui_ImplGlfw_NewFrame(); };
+
+    ImGui::CreateContext();
+
+    ImGui_ImplGlfw_InitForVulkan(_window, true);
 
     _engine->Init(initInfo);
 }
@@ -55,6 +61,7 @@ void WinApp::Run()
 
 WinApp::~WinApp()
 {
+    ImGui_ImplGlfw_Shutdown();
     _engine->Shutdown();
 
     glfwDestroyWindow(_window);

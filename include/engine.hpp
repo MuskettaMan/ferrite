@@ -10,6 +10,7 @@
 class Engine
 {
 public:
+    const static uint32_t MAX_FRAMES_IN_FLIGHT{ 2 };
     struct InitInfo
     {
         uint32_t extensionCount{ 0 };
@@ -17,6 +18,7 @@ public:
         uint32_t width, height;
 
         std::function<vk::SurfaceKHR(vk::Instance)> retrieveSurface;
+        std::function<void()> newImGuiFrame;
     };
     struct QueueFamilyIndices
     {
@@ -53,6 +55,7 @@ private:
     vk::PipelineLayout _pipelineLayout;
     vk::RenderPass _renderPass;
     vk::Pipeline _pipeline;
+    vk::DescriptorPool _descriptorPool;
 
     vk::SwapchainKHR _swapChain;
     std::vector<vk::Image> _swapChainImages;
@@ -62,22 +65,26 @@ private:
     vk::Extent2D _swapChainExtent;
 
     vk::CommandPool _commandPool;
-    vk::CommandBuffer _commandBuffer;
+    std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
 
     vk::Viewport _viewport;
     vk::Rect2D _scissor;
 
-    vk::Semaphore _imageAvailableSemaphore;
-    vk::Semaphore _renderFinishedSemaphore;
-    vk::Fence _inFlightFence;
+    std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _imageAvailableSemaphores;
+    std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _renderFinishedSemaphores;
+    std::array<vk::Fence, MAX_FRAMES_IN_FLIGHT> _inFlightFences;
 
     vk::DebugUtilsMessengerEXT _debugMessenger;
 
+    std::function<void()> _newImGuiFrame;
+
+    uint32_t _currentFrame{ 0 };
+
     // Variables to store the time points
-    std::chrono::steady_clock::time_point frameStart, frameEnd;
-    std::chrono::duration<double> frameDuration;
-    double fps = 0.0;
-    double msPerFrame = 0.0;
+    std::chrono::steady_clock::time_point _frameStart, _frameEnd;
+    std::chrono::duration<double> _frameDuration;
+    double _fps = 0.0;
+    double _msPerFrame = 0.0;
 
     const std::vector<const char*> _validationLayers =
     {
@@ -114,9 +121,10 @@ private:
     void CreateRenderPass();
     void CreateFrameBuffers();
     void CreateCommandPool();
-    void CreateCommandBuffer();
+    void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
     void CreateSyncObjects();
+    void CreateDescriptorPool();
 
     void LogInstanceExtensions();
 

@@ -31,7 +31,9 @@
 
 **/.idea
 **/cmake-build-debug
-**/cmake-build-debug-remote-host
+**/cmake-build-debug-raspberry-pi
+**/cmake-build-release
+**/cmake-build-release-raspberry-pi
 **/CMakeCache.txt
 **/cmake_install.cmake
 **/install_manifest.txt

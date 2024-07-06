@@ -8,6 +8,7 @@
 
 #include "engine.hpp"
 #include "vulkan_helper.hpp"
+#include "imgui/backends/linux/imgui_impl_xlib.h"
 
 static inline xcb_intern_atom_reply_t* intern_atom_helper(xcb_connection_t* conn, bool only_if_exists, const char* str)
 {
@@ -18,11 +19,13 @@ static inline xcb_intern_atom_reply_t* intern_atom_helper(xcb_connection_t* conn
 
 LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
 {
+    _display = XOpenDisplay(nullptr);
+
     // xcb_connect always returns a non-NULL pointer to a xcb_connection_t,
     // even on failure. Callers need to use xcb_connection_has_error() to
     // check for failure. When finished, use xcb_disconnect() to close the
     // g_connection and free the structure.
-    _connection = xcb_connect(nullptr, nullptr);
+    _connection = XGetXCBConnection(_display);
     assert(_connection);
 
     const xcb_setup_t* setup = xcb_get_setup(_connection);
@@ -80,6 +83,9 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
         free(atomWmState);
     }
 
+    _wmDeleteMessage = XInternAtom(_display, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(_display, _window, &_wmDeleteMessage, 1);
+
     xcb_map_window(_connection, _window);
     xcb_flush(_connection);
 
@@ -105,6 +111,11 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
 
         return vk::SurfaceKHR{ surface };
     };
+    initInfo.newImGuiFrame = [](){ ImGui_ImplXlib_NewFrame(); };
+
+    ImGui::CreateContext();
+
+    ImGui_ImplXlib_Init(_display, _window);
 
     _engine->Init(initInfo);
 }
@@ -113,12 +124,23 @@ void LinuxApp::Run()
 {
     while(!_quit)
     {
+        while(XPending(_display))
+        {
+            XEvent event;
+            XNextEvent(_display, &event);
+            ImGui_ImplXlib_ProcessEvent(&event);
+
+            if(event.type == ClientMessage && event.xclient.window == _window && static_cast<Atom>(event.xclient.data.l[0]) == _wmDeleteMessage)
+                _quit = true;
+        }
+
         _engine->Run();
     }
 }
 
 LinuxApp::~LinuxApp()
 {
+    ImGui_ImplXlib_Shutdown();
     _engine->Shutdown();
 
     xcb_destroy_window(_connection, _window);

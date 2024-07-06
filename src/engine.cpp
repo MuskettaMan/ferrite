@@ -6,10 +6,12 @@
 #include <map>
 #include <set>
 
+#include "imgui.h"
 #include "engine.hpp"
 #include "vulkan_validation.hpp"
 #include "vulkan_helper.hpp"
 #include "shaders/shader_loader.hpp"
+#include "imgui_impl_vulkan.h"
 
 Engine::Engine()
 {
@@ -31,38 +33,69 @@ void Engine::Init(const InitInfo& initInfo)
     CreateGraphicsPipeline();
     CreateFrameBuffers();
     CreateCommandPool();
-    CreateCommandBuffer();
+    CreateCommandBuffers();
     CreateSyncObjects();
+    CreateDescriptorPool();
+
+    _newImGuiFrame = initInfo.newImGuiFrame;
+
+    QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
+
+    ImGui_ImplVulkan_InitInfo initInfoVulkan{};
+    initInfoVulkan.RenderPass = _renderPass;
+    initInfoVulkan.PhysicalDevice = _physicalDevice;
+    initInfoVulkan.Device = _device;
+    initInfoVulkan.ImageCount = MAX_FRAMES_IN_FLIGHT;
+    initInfoVulkan.Instance = _instance;
+    initInfoVulkan.MSAASamples = VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT;
+    initInfoVulkan.Queue = _graphicsQueue;
+    initInfoVulkan.QueueFamily = familyIndices.graphicsFamily.value();
+    initInfoVulkan.DescriptorPool = _descriptorPool;
+    initInfoVulkan.MinImageCount = 2;
+    initInfoVulkan.ImageCount = _swapChainImageViews.size();
+    ImGui_ImplVulkan_Init(&initInfoVulkan);
+
+    ImGui_ImplVulkan_CreateFontsTexture();
+
 }
 
 void Engine::Run()
 {
-    util::VK_ASSERT(_device.waitForFences(1, &_inFlightFence, vk::True, std::numeric_limits<uint64_t>::max()), "Failed waiting on in flight fence!");
-    _device.resetFences(1, &_inFlightFence);
+    util::VK_ASSERT(_device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()), "Failed waiting on in flight fence!");
+    _device.resetFences(1, &_inFlightFences[_currentFrame]);
 
-    frameStart = std::chrono::steady_clock::now();
+    _frameStart = std::chrono::steady_clock::now();
 
     uint32_t imageIndex;
-    util::VK_ASSERT(_device.acquireNextImageKHR(_swapChain, std::numeric_limits<uint64_t>::max(), _imageAvailableSemaphore, nullptr, &imageIndex), "Failed acquiring next image from swap chain!");
+    util::VK_ASSERT(_device.acquireNextImageKHR(_swapChain, std::numeric_limits<uint64_t>::max(), _imageAvailableSemaphores[_currentFrame], nullptr, &imageIndex), "Failed acquiring next image from swap chain!");
 
-    _commandBuffer.reset();
 
-    RecordCommandBuffer(_commandBuffer, imageIndex);
+    ImGui_ImplVulkan_NewFrame();
+    _newImGuiFrame();
+    ImGui::NewFrame();
+
+    ImGui::ShowDemoWindow();
+
+    ImGui::Render();
+
+    _commandBuffers[_currentFrame].reset();
+
+    RecordCommandBuffer(_commandBuffers[_currentFrame], imageIndex);
 
     vk::SubmitInfo submitInfo{};
-    vk::Semaphore waitSemaphores[] = { _imageAvailableSemaphore };
+    vk::Semaphore waitSemaphores[] = { _imageAvailableSemaphores[_currentFrame] };
     vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &_commandBuffer;
+    submitInfo.pCommandBuffers = &_commandBuffers[_currentFrame];
 
-    vk::Semaphore signalSemaphores[] = { _renderFinishedSemaphore };
+    vk::Semaphore signalSemaphores[] = { _renderFinishedSemaphores[_currentFrame] };
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    util::VK_ASSERT(_graphicsQueue.submit(1, &submitInfo, _inFlightFence), "Failed submitting to graphics queue!");
+    util::VK_ASSERT(_graphicsQueue.submit(1, &submitInfo, _inFlightFences[_currentFrame]), "Failed submitting to graphics queue!");
 
     vk::PresentInfoKHR presentInfo{};
     presentInfo.waitSemaphoreCount = 1;
@@ -78,24 +111,31 @@ void Engine::Run()
     _device.waitIdle();
 
     // Get the end time of the frame
-    frameEnd = std::chrono::steady_clock::now();
+    _frameEnd = std::chrono::steady_clock::now();
 
     // Calculate the frame duration
-    frameDuration = duration_cast<std::chrono::duration<double>>(frameEnd - frameStart);
+    _frameDuration = duration_cast<std::chrono::duration<double>>(_frameEnd - _frameStart);
 
     // Convert frame duration to milliseconds
-    msPerFrame = frameDuration.count() * 1000.0;
+    _msPerFrame = _frameDuration.count() * 1000.0;
 
     // Calculate frames per second (FPS)
-    fps = 1.0 / frameDuration.count();
-    std::cout << "Frame Time: " << msPerFrame << " ms (" << fps << " FPS)" << std::endl;
+    _fps = 1.0 / _frameDuration.count();
+
+    _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void Engine::Shutdown()
 {
-    _device.destroy(_inFlightFence);
-    _device.destroy(_renderFinishedSemaphore);
-    _device.destroy(_imageAvailableSemaphore);
+    ImGui_ImplVulkan_Shutdown();
+    ImGui::DestroyContext();
+
+    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        _device.destroy(_inFlightFences[i]);
+        _device.destroy(_renderFinishedSemaphores[i]);
+        _device.destroy(_imageAvailableSemaphores[i]);
+    }
 
     for(auto frameBuffer : _swapChainFrameBuffers)
         _device.destroy(frameBuffer);
@@ -341,7 +381,7 @@ vk::SurfaceFormatKHR Engine::ChooseSwapSurfaceFormat(const std::vector<vk::Surfa
 {
     for(const auto& format : availableFormats)
     {
-        if(format.format == vk::Format::eB8G8R8A8Srgb && format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear)
+        if(format.format == vk::Format::eB8G8R8A8Unorm && format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear)
             return format;
     }
 
@@ -632,14 +672,14 @@ void Engine::CreateCommandPool()
     util::VK_ASSERT(_device.createCommandPool(&commandPoolCreateInfo, nullptr, &_commandPool), "Failed creating command pool!");
 }
 
-void Engine::CreateCommandBuffer()
+void Engine::CreateCommandBuffers()
 {
     vk::CommandBufferAllocateInfo commandBufferAllocateInfo{};
     commandBufferAllocateInfo.commandPool = _commandPool;
     commandBufferAllocateInfo.level = vk::CommandBufferLevel::ePrimary;
-    commandBufferAllocateInfo.commandBufferCount = 1;
+    commandBufferAllocateInfo.commandBufferCount = _commandBuffers.size();
 
-    util::VK_ASSERT(_device.allocateCommandBuffers(&commandBufferAllocateInfo, &_commandBuffer), "Failed allocating command buffer!");
+    util::VK_ASSERT(_device.allocateCommandBuffers(&commandBufferAllocateInfo, _commandBuffers.data()), "Failed allocating command buffer!");
 }
 
 void Engine::RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex)
@@ -656,18 +696,20 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_
     renderPassBeginInfo.clearValueCount = 1;
     renderPassBeginInfo.pClearValues = &clearColor;
 
-    _commandBuffer.beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
+    commandBuffer.beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
 
-    _commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pipeline);
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pipeline);
 
-    _commandBuffer.setViewport(0, 1, &_viewport);
-    _commandBuffer.setScissor(0, 1, &_scissor);
+    commandBuffer.setViewport(0, 1, &_viewport);
+    commandBuffer.setScissor(0, 1, &_scissor);
 
-    _commandBuffer.draw(3, 1, 0, 0);
+    commandBuffer.draw(3, 1, 0, 0);
 
-    _commandBuffer.endRenderPass();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
 
-    _commandBuffer.end();
+    commandBuffer.endRenderPass();
+
+    commandBuffer.end();
 }
 
 void Engine::CreateSyncObjects()
@@ -677,7 +719,30 @@ void Engine::CreateSyncObjects()
     fenceCreateInfo.flags = vk::FenceCreateFlagBits::eSignaled;
 
     std::string errorMsg{ "Failed creating sync object!" };
-    util::VK_ASSERT(_device.createSemaphore(&semaphoreCreateInfo, nullptr, &_imageAvailableSemaphore), errorMsg);
-    util::VK_ASSERT(_device.createSemaphore(&semaphoreCreateInfo, nullptr, &_renderFinishedSemaphore), errorMsg);
-    util::VK_ASSERT(_device.createFence(&fenceCreateInfo, nullptr, &_inFlightFence), errorMsg);
+    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        util::VK_ASSERT(_device.createSemaphore(&semaphoreCreateInfo, nullptr, &_imageAvailableSemaphores[i]), errorMsg);
+        util::VK_ASSERT(_device.createSemaphore(&semaphoreCreateInfo, nullptr, &_renderFinishedSemaphores[i]), errorMsg);
+        util::VK_ASSERT(_device.createFence(&fenceCreateInfo, nullptr, &_inFlightFences[i]), errorMsg);
+    }
+}
+
+void Engine::CreateDescriptorPool()
+{
+    std::vector<vk::DescriptorPoolSize> poolSizes = {
+            {vk::DescriptorType::eSampler, 1000},
+            {vk::DescriptorType::eCombinedImageSampler, 1000},
+            {vk::DescriptorType::eSampledImage, 1000},
+            {vk::DescriptorType::eStorageImage, 1000},
+            {vk::DescriptorType::eUniformTexelBuffer, 1000},
+            {vk::DescriptorType::eStorageTexelBuffer, 1000},
+            {vk::DescriptorType::eUniformBuffer, 1000},
+            {vk::DescriptorType::eStorageBuffer, 1000},
+            {vk::DescriptorType::eUniformBufferDynamic, 1000},
+            {vk::DescriptorType::eStorageBufferDynamic, 1000},
+            {vk::DescriptorType::eInputAttachment, 1000}
+    };
+
+    vk::DescriptorPoolCreateInfo createInfo{ vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1000, static_cast<uint32_t>(poolSizes.size()), poolSizes.data() };
+    util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }

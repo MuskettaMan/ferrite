@@ -9,8 +9,6 @@ set(CMAKE_CXX_STANDARD 23)
 
 #include_directories(external/vulkan)
 include_directories(external)
-include_directories(external/glm)
-add_subdirectory(external/glm)
 
 add_subdirectory(external/magic_enum)
 
@@ -39,14 +37,24 @@ elseif(LINUX)
         include_directories(${Vulkan_INCLUDE_DIRS})
     endif()
 
+    find_package(X11 REQUIRED)
+    if(X11_FOUND)
+        message(STATUS "Found x11")
+        include_directories(${X11_INCLUDE_DIRS})
+        #link_libraries(${X11_LIBRARIES})
+    endif()
+    if(NOT X11_xcb_FOUND)
+        message(FATAL_ERROR "X11-XCB not found")
+    endif()
 
     find_package(xcb REQUIRED)
     if(xcb_FOUND)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_USE_PLATFORM_XCB_KHR")
         message(STATUS "Found xcb")
         include_directories(${XCB_INCLUDE_DIRS})
-        link_libraries(${XCB_LIBRARIES})
+        #link_libraries(${XCB_LIBRARIES})
     endif ()
+
 endif()
 
 if(NOT Vulkan_FOUND)
@@ -84,7 +92,84 @@ list(REMOVE_DUPLICATES SOURCE_FILES)
 # Create executable
 add_executable(pi_vulkan ${SOURCE_FILES})
 
+target_include_directories(pi_vulkan SYSTEM PRIVATE external/glm)
+add_subdirectory(external/glm SYSTEM)
+
 target_link_libraries(pi_vulkan PRIVATE magic_enum::magic_enum)
 target_include_directories(pi_vulkan PUBLIC include)
-target_compile_options(pi_vulkan PRIVATE -fexceptions -frtti)
+target_compile_options(pi_vulkan PRIVATE -fexceptions -frtti $<$<CONFIG:Debug>:-O0 -g> $<$<CONFIG:Release>:-O3>)
+target_link_options(pi_vulkan PRIVATE
+        $<$<CONFIG:Release>:-s>
+)
 
+# X11 XCB
+if(LINUX)
+    find_library(XINPUT_LIBRARY NAMES Xi)
+    find_path(XINPUT_INCLUDE_DIR NAMES X11/extensions/XInput2.h)
+
+    if(NOT XINPUT_LIBRARY OR NOT XINPUT_INCLUDE_DIR)
+        message(FATAL_ERROR "XInput2 not found")
+    endif()
+
+    target_link_libraries(pi_vulkan PRIVATE ${X11_LIBRARIES} ${XCB_LIBRARIES} ${X11_xcb_LIB} ${X11_X11_xcb_LIB} ${XINPUT_LIBRARY})
+endif()
+
+# END X11 XCB
+
+# FREE TYPE
+
+set(FREETYPE_DIR external/freetype/freetype2)
+
+add_subdirectory(external/freetype/freetype2)
+
+target_link_libraries(pi_vulkan PUBLIC ${FREETYPE_LIBRARY})
+target_include_directories(pi_vulkan SYSTEM PUBLIC ${FREETYPE_DIR}/include)
+
+# END FREETYPE
+
+# IMGUI
+
+set(IMGUI_DIR external/imgui)
+
+file(GLOB_RECURSE IMGUI_SOURCE_FILES ${IMGUI_DIR}/*.cpp)
+file(GLOB_RECURSE IMGUI_SOURCE_FILES_WIN32 ${IMGUI_DIR}/backends/win/*.cpp)
+file(GLOB_RECURSE IMGUI_SOURCE_FILES_LINUX ${IMGUI_DIR}/backends/linux/*.cpp)
+if(WIN32)
+    list(REMOVE_ITEM IMGUI_SOURCE_FILES ${IMGUI_SOURCE_FILES_LINUX})
+elseif(LINUX)
+    list(REMOVE_ITEM IMGUI_SOURCE_FILES ${IMGUI_SOURCE_FILES_WIN32})
+endif()
+
+add_library(imgui STATIC ${IMGUI_SOURCE_FILES})
+
+target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_include_directories(imgui PUBLIC ${FREETYPE_DIR}/include)
+
+target_link_libraries(pi_vulkan PRIVATE imgui)
+target_link_libraries(pi_vulkan PRIVATE ${XINPUT_LIBRARY})
+target_include_directories(pi_vulkan PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+
+# END IMGUI
+
+
+# BUILD TYPE SETTINGS
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    message("Debug build.")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
+elseif(CMAKE_BUILD_TYPE MATCHES Release)
+    message("Release build.")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+endif()
+
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    target_compile_definitions(pi_vulkan PRIVATE DEBUG_MODE)
+elseif(CMAKE_BUILD_TYPE MATCHES Release)
+    target_compile_definitions(pi_vulkan PRIVATE NDEBUG)
+endif()
+
+# END BUILD TYPE SETTINGS

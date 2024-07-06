@@ -1,6 +1,7 @@
 #include "application.hpp"
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
+#include <X11/Xlib-xcb.h>
 
 class LinuxApp : public Application
 {
@@ -14,4 +15,6 @@ private:
     xcb_screen_t* _screen;
     xcb_window_t _window;
     xcb_intern_atom_reply_t* _atomWmDeleteWindow;
+    Display* _display;
+    Atom _wmDeleteMessage;
 };
