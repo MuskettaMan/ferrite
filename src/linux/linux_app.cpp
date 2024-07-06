@@ -113,20 +113,6 @@ void LinuxApp::Run()
 {
     while(!_quit)
     {
-        auto tStart = std::chrono::high_resolution_clock::now();
-
-        _frameCounter++;
-        auto tEnd = std::chrono::high_resolution_clock::now();
-        auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
-        _frameTimer = tDiff / 1000.0f;
-
-        if(!_paused)
-        {
-            _timer += _frameTimer;
-            if(_timer > 1.0f)
-                _timer -= 1.0f;
-        }
-
         _engine->Run();
     }
 }

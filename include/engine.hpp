@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <functional>
+#include <chrono>
 #include <vulkan/vulkan.hpp>
 #include "class_decorations.hpp"
 
@@ -49,14 +50,34 @@ private:
     vk::Queue _graphicsQueue;
     vk::Queue _presentQueue;
     vk::SurfaceKHR _surface;
+    vk::PipelineLayout _pipelineLayout;
+    vk::RenderPass _renderPass;
+    vk::Pipeline _pipeline;
 
     vk::SwapchainKHR _swapChain;
     std::vector<vk::Image> _swapChainImages;
     std::vector<vk::ImageView> _swapChainImageViews;
+    std::vector<vk::Framebuffer> _swapChainFrameBuffers;
     vk::Format _swapChainFormat;
     vk::Extent2D _swapChainExtent;
 
+    vk::CommandPool _commandPool;
+    vk::CommandBuffer _commandBuffer;
+
+    vk::Viewport _viewport;
+    vk::Rect2D _scissor;
+
+    vk::Semaphore _imageAvailableSemaphore;
+    vk::Semaphore _renderFinishedSemaphore;
+    vk::Fence _inFlightFence;
+
     vk::DebugUtilsMessengerEXT _debugMessenger;
+
+    // Variables to store the time points
+    std::chrono::steady_clock::time_point frameStart, frameEnd;
+    std::chrono::duration<double> frameDuration;
+    double fps = 0.0;
+    double msPerFrame = 0.0;
 
     const std::vector<const char*> _validationLayers =
     {
@@ -70,7 +91,7 @@ private:
 #endif
     const std::vector<const char*> _deviceExtensions =
     {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     };
 
 
@@ -89,6 +110,13 @@ private:
     vk::PresentModeKHR ChoosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
     vk::Extent2D ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities, const InitInfo& initInfo);
     void CreateSwapChainImageViews();
+    void CreateGraphicsPipeline();
+    void CreateRenderPass();
+    void CreateFrameBuffers();
+    void CreateCommandPool();
+    void CreateCommandBuffer();
+    void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
+    void CreateSyncObjects();
 
     void LogInstanceExtensions();
 
