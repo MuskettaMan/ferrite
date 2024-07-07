@@ -2,6 +2,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
+#include <iostream>
 
 PerformanceTracker::PerformanceTracker()
 {
@@ -37,7 +38,7 @@ void PerformanceTracker::Update()
         _highestFps = *it;
         _highestFpsRecordIndex = _frameCounter - std::distance(_fpsValues.begin(), it);
     }
-    if(_frameCounter - _highestFrameDuration > MAX_SAMPLES)
+    if(_frameCounter - _highestFrameDurationRecordIndex > MAX_SAMPLES)
     {
         auto it = std::max_element(_frameDurations.begin(), _frameDurations.end());
         _highestFrameDuration = *it;
