@@ -8,7 +8,9 @@ class WinApp : public Application
 public:
     WinApp(const CreateParameters& parameters);
     ~WinApp() override;
-    void Run() override;
+    void Run(std::function<void()> updateLoop) override;
+    glm::uvec2 DisplaySize() override;
+    InitInfo GetInitInfo() override;
 
 private:
     GLFWwindow* _window;

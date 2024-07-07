@@ -6,7 +6,6 @@
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_xcb.h>
 
-#include "engine.hpp"
 #include "vulkan_helper.hpp"
 #include "imgui/backends/linux/imgui_impl_xlib.h"
 
@@ -89,14 +88,48 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
     xcb_map_window(_connection, _window);
     xcb_flush(_connection);
 
-    std::vector<const char*> extensions{};
-    extensions.emplace_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
-    extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    ImGui_ImplXlib_Init(_display, _window);
+}
 
+void LinuxApp::Run(std::function<void()> updateLoop)
+{
+    while(!_quit)
+    {
+        while(XPending(_display))
+        {
+            XEvent event;
+            XNextEvent(_display, &event);
+            ImGui_ImplXlib_ProcessEvent(&event);
 
-    Engine::InitInfo initInfo{};
-    initInfo.extensions = extensions.data();
-    initInfo.extensionCount = extensions.size();
+            if(event.type == ClientMessage && event.xclient.window == _window && static_cast<Atom>(event.xclient.data.l[0]) == _wmDeleteMessage)
+                _quit = true;
+        }
+
+        _width = _screen->width_in_pixels;
+        _height = _screen->height_in_pixels;
+
+        updateLoop();
+    }
+}
+
+LinuxApp::~LinuxApp()
+{
+    ImGui_ImplXlib_Shutdown();
+
+    xcb_destroy_window(_connection, _window);
+    xcb_disconnect(_connection);
+}
+
+glm::uvec2 LinuxApp::DisplaySize()
+{
+    return glm::uvec2(_width, _height);
+}
+
+InitInfo LinuxApp::GetInitInfo()
+{
+    InitInfo initInfo{};
+    initInfo.extensions = _extensions.data();
+    initInfo.extensionCount = _extensions.size();
 
     initInfo.width = _width;
     initInfo.height = _height;
@@ -113,36 +146,5 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
     };
     initInfo.newImGuiFrame = [](){ ImGui_ImplXlib_NewFrame(); };
 
-    ImGui::CreateContext();
-
-    ImGui_ImplXlib_Init(_display, _window);
-
-    _engine->Init(initInfo);
-}
-
-void LinuxApp::Run()
-{
-    while(!_quit)
-    {
-        while(XPending(_display))
-        {
-            XEvent event;
-            XNextEvent(_display, &event);
-            ImGui_ImplXlib_ProcessEvent(&event);
-
-            if(event.type == ClientMessage && event.xclient.window == _window && static_cast<Atom>(event.xclient.data.l[0]) == _wmDeleteMessage)
-                _quit = true;
-        }
-
-        _engine->Run();
-    }
-}
-
-LinuxApp::~LinuxApp()
-{
-    ImGui_ImplXlib_Shutdown();
-    _engine->Shutdown();
-
-    xcb_destroy_window(_connection, _window);
-    xcb_disconnect(_connection);
+    return initInfo;
 }

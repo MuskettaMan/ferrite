@@ -3,9 +3,9 @@
 #include <string_view>
 #include <functional>
 #include <memory>
+#include <glm/glm.hpp>
 #include "class_decorations.hpp"
-
-class Engine;
+#include "engine_init_info.hpp"
 
 class Application
 {
@@ -14,23 +14,22 @@ public:
    {
        std::string_view windowTitle;
        bool isFullscreen;
-
-       std::shared_ptr<Engine> engine;
    };
 
     Application(const CreateParameters& parameters);
+    virtual InitInfo GetInitInfo() = 0;
+    virtual glm::uvec2 DisplaySize() = 0;
 
     NON_COPYABLE(Application);
     NON_MOVABLE(Application);
 
     virtual ~Application();
-    virtual void Run() = 0;
+    virtual void Run(std::function<void()> updateLoop) = 0;
 
 protected:
     uint32_t _width, _height;
     std::string_view _windowTitle;
     bool _isFullscreen;
-    std::shared_ptr<Engine> _engine;
 
     bool _quit = false;
     bool _paused = false;

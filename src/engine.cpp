@@ -5,6 +5,7 @@
 #include <cstring>
 #include <map>
 #include <set>
+#include <implot.h>
 
 #include "imgui.h"
 #include "engine.hpp"
@@ -15,11 +16,14 @@
 
 Engine::Engine()
 {
-
+    ImGui::CreateContext();
+    ImPlot::CreateContext();
 }
 
-void Engine::Init(const InitInfo& initInfo)
+void Engine::Init(const InitInfo& initInfo, std::shared_ptr<Application> application)
 {
+    _application = std::move(application);
+
     CreateInstance(initInfo);
     SetupDebugMessenger();
 
@@ -27,11 +31,15 @@ void Engine::Init(const InitInfo& initInfo)
 
     PickPhysicalDevice();
     CreateDevice();
-    CreateSwapChain(initInfo);
-    CreateSwapChainImageViews();
+
+    _swapChain = std::make_unique<SwapChain>(_device, _physicalDevice, _surface);
+
+    QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
+    _swapChain->CreateSwapChain(glm::uvec2{ initInfo.width, initInfo.height }, familyIndices);
+
     CreateRenderPass();
     CreateGraphicsPipeline();
-    CreateFrameBuffers();
+    _swapChain->CreateFrameBuffers(_renderPass);
     CreateCommandPool();
     CreateCommandBuffers();
     CreateSyncObjects();
@@ -39,7 +47,6 @@ void Engine::Init(const InitInfo& initInfo)
 
     _newImGuiFrame = initInfo.newImGuiFrame;
 
-    QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
 
     ImGui_ImplVulkan_InitInfo initInfoVulkan{};
     initInfoVulkan.RenderPass = _renderPass;
@@ -52,7 +59,7 @@ void Engine::Init(const InitInfo& initInfo)
     initInfoVulkan.QueueFamily = familyIndices.graphicsFamily.value();
     initInfoVulkan.DescriptorPool = _descriptorPool;
     initInfoVulkan.MinImageCount = 2;
-    initInfoVulkan.ImageCount = _swapChainImageViews.size();
+    initInfoVulkan.ImageCount = _swapChain->GetImageCount();
     ImGui_ImplVulkan_Init(&initInfoVulkan);
 
     ImGui_ImplVulkan_CreateFontsTexture();
@@ -62,19 +69,30 @@ void Engine::Init(const InitInfo& initInfo)
 void Engine::Run()
 {
     util::VK_ASSERT(_device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()), "Failed waiting on in flight fence!");
-    _device.resetFences(1, &_inFlightFences[_currentFrame]);
 
-    _frameStart = std::chrono::steady_clock::now();
+    _performanceTracker.Update();
 
     uint32_t imageIndex;
-    util::VK_ASSERT(_device.acquireNextImageKHR(_swapChain, std::numeric_limits<uint64_t>::max(), _imageAvailableSemaphores[_currentFrame], nullptr, &imageIndex), "Failed acquiring next image from swap chain!");
+    vk::Result result = _device.acquireNextImageKHR(_swapChain->GetSwapChain(), std::numeric_limits<uint64_t>::max(), _imageAvailableSemaphores[_currentFrame], nullptr, &imageIndex);
+
+    if(result == vk::Result::eErrorOutOfDateKHR)
+    {
+        QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
+        _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, familyIndices);
+        return;
+    }
+    else
+        util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
+
+    _device.resetFences(1, &_inFlightFences[_currentFrame]);
 
 
     ImGui_ImplVulkan_NewFrame();
     _newImGuiFrame();
     ImGui::NewFrame();
 
-    ImGui::ShowDemoWindow();
+    // ImGui stuff
+    _performanceTracker.Render();
 
     ImGui::Render();
 
@@ -101,33 +119,29 @@ void Engine::Run()
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = signalSemaphores;
 
-    vk::SwapchainKHR swapchains[] = { _swapChain };
+    vk::SwapchainKHR swapchains[] = { _swapChain->GetSwapChain() };
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = swapchains;
     presentInfo.pImageIndices = &imageIndex;
 
-    _presentQueue.presentKHR(&presentInfo);
+    result = _presentQueue.presentKHR(&presentInfo);
+
+
+    if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
+    {
+        QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
+        _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, familyIndices);
+    }
+    else
+        util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
 
     _device.waitIdle();
-
-    // Get the end time of the frame
-    _frameEnd = std::chrono::steady_clock::now();
-
-    // Calculate the frame duration
-    _frameDuration = duration_cast<std::chrono::duration<double>>(_frameEnd - _frameStart);
-
-    // Convert frame duration to milliseconds
-    _msPerFrame = _frameDuration.count() * 1000.0;
-
-    // Calculate frames per second (FPS)
-    _fps = 1.0 / _frameDuration.count();
-
-    _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void Engine::Shutdown()
 {
     ImGui_ImplVulkan_Shutdown();
+    ImPlot::DestroyContext();
     ImGui::DestroyContext();
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
@@ -137,13 +151,12 @@ void Engine::Shutdown()
         _device.destroy(_imageAvailableSemaphores[i]);
     }
 
-    for(auto frameBuffer : _swapChainFrameBuffers)
-        _device.destroy(frameBuffer);
-    for(auto imageView : _swapChainImageViews)
-        _device.destroy(imageView);
-
     if(_enableValidationLayers)
         util::DestroyDebugUtilsMessengerEXT(_instance, _debugMessenger, nullptr);
+
+    _swapChain.reset();
+
+    _device.destroy(_descriptorPool);
 
     _device.destroy(_commandPool);
 
@@ -151,7 +164,6 @@ void Engine::Shutdown()
     _device.destroy(_pipelineLayout);
     _device.destroy(_renderPass);
 
-    _device.destroy(_swapChain);
     _instance.destroy(_surface);
     _device.destroy();
     _instance.destroy();
@@ -278,7 +290,7 @@ uint32_t Engine::RateDeviceSuitability(const vk::PhysicalDevice& device)
         return 0;
 
     // Check support for swap chain.
-    SwapChainSupportDetails swapChainSupportDetails = QuerySwapChainSupport(device);
+    SwapChain::SupportDetails swapChainSupportDetails = SwapChain::QuerySupport(device, _surface);
     bool swapChainUnsupported = swapChainSupportDetails.formats.empty() || swapChainSupportDetails.presentModes.empty();
     if(swapChainUnsupported)
         return 0;
@@ -302,7 +314,7 @@ bool Engine::ExtensionsSupported(const vk::PhysicalDevice& device)
     return requiredExtensions.empty();
 }
 
-Engine::QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const& device)
+QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const& device)
 {
     QueueFamilyIndices indices{};
 
@@ -365,128 +377,6 @@ void Engine::CreateDevice()
     _device.getQueue(familyIndices.presentFamily.value(), 0, &_presentQueue);
 }
 
-Engine::SwapChainSupportDetails Engine::QuerySwapChainSupport(const vk::PhysicalDevice& device)
-{
-    SwapChainSupportDetails details{};
-
-    util::VK_ASSERT(device.getSurfaceCapabilitiesKHR(_surface, &details.capabilities), "Failed getting surface capabilities from physical device!");
-
-    details.formats = device.getSurfaceFormatsKHR(_surface);
-    details.presentModes = device.getSurfacePresentModesKHR(_surface);
-
-    return details;
-}
-
-vk::SurfaceFormatKHR Engine::ChooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats)
-{
-    for(const auto& format : availableFormats)
-    {
-        if(format.format == vk::Format::eB8G8R8A8Unorm && format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear)
-            return format;
-    }
-
-    return availableFormats[0];
-}
-
-vk::PresentModeKHR Engine::ChoosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes)
-{
-    auto it = std::find_if(availablePresentModes.begin(), availablePresentModes.end(),
-                           [](const auto& mode) { return mode == vk::PresentModeKHR::eMailbox; });
-    if(it != availablePresentModes.end())
-        return *it;
-
-    it = std::find_if(availablePresentModes.begin(), availablePresentModes.end(),
-                      [](const auto& mode) { return mode == vk::PresentModeKHR::eFifo; });
-    if(it != availablePresentModes.end())
-        return *it;
-
-    return availablePresentModes[0];
-}
-
-vk::Extent2D Engine::ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities, const InitInfo& initInfo)
-{
-    if(capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max())
-        return capabilities.currentExtent;
-
-    vk::Extent2D extent = { initInfo.width, initInfo.height };
-    extent.width = std::clamp(extent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-    extent.height = std::clamp(extent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-
-    return extent;
-}
-
-void Engine::CreateSwapChain(const InitInfo& initInfo)
-{
-    SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(_physicalDevice);
-
-    auto surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
-    auto presentMode = ChoosePresentMode(swapChainSupport.presentModes);
-    auto extent = ChooseSwapExtent(swapChainSupport.capabilities, initInfo);
-
-    uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
-    if(swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount)
-        imageCount = swapChainSupport.capabilities.maxImageCount;
-
-    vk::SwapchainCreateInfoKHR createInfo{};
-    createInfo.surface = _surface;
-    createInfo.minImageCount = imageCount;
-    createInfo.imageFormat = surfaceFormat.format;
-    createInfo.imageColorSpace = surfaceFormat.colorSpace;
-    createInfo.imageExtent = extent;
-    createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment; // TODO: Can change this later to a memory transfer operation, when doing post-processing.
-
-    QueueFamilyIndices indices = FindQueueFamilies(_physicalDevice);
-    uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
-    if(indices.graphicsFamily != indices.presentFamily)
-    {
-        createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
-        createInfo.queueFamilyIndexCount = 2;
-        createInfo.pQueueFamilyIndices = queueFamilyIndices;
-    }
-    else
-    {
-        createInfo.imageSharingMode = vk::SharingMode::eExclusive;
-        createInfo.queueFamilyIndexCount = 0;
-        createInfo.pQueueFamilyIndices = nullptr;
-    }
-
-    createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
-    createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
-    createInfo.presentMode = presentMode;
-    createInfo.clipped = vk::True;
-    createInfo.oldSwapchain = nullptr;
-
-    util::VK_ASSERT(_device.createSwapchainKHR(&createInfo, nullptr, &_swapChain), "Failed creating swap chain!");
-
-    _swapChainImages = _device.getSwapchainImagesKHR(_swapChain);
-    _swapChainFormat = surfaceFormat.format;
-    _swapChainExtent = extent;
-}
-
-void Engine::CreateSwapChainImageViews()
-{
-    _swapChainImageViews.resize(_swapChainImages.size());
-    for(size_t i = 0; i < _swapChainImageViews.size(); ++i)
-    {
-        vk::ImageViewCreateInfo createInfo{
-            vk::ImageViewCreateFlags{},
-            _swapChainImages[i],
-            vk::ImageViewType::e2D,
-            _swapChainFormat,
-            vk::ComponentMapping{ vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity },
-            vk::ImageSubresourceRange{
-                vk::ImageAspectFlagBits::eColor, // aspect mask
-                0, // base mip level
-                1, // level count
-                0, // base array level
-                1  // layer count
-            }
-        };
-        util::VK_ASSERT(_device.createImageView(&createInfo, nullptr, &_swapChainImageViews[i]), "Failed creating image view for swap chain!");
-    }
-}
-
 void Engine::CreateGraphicsPipeline()
 {
     auto vertByteCode = shader::ReadFile("shaders/triangle-v.spv");
@@ -515,8 +405,9 @@ void Engine::CreateGraphicsPipeline()
     inputAssemblyStateCreateInfo.topology = vk::PrimitiveTopology::eTriangleList;
     inputAssemblyStateCreateInfo.primitiveRestartEnable = vk::False;
 
-    _viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(_swapChainExtent.width), static_cast<float>(_swapChainExtent.height), 0.0f, 1.0f };
-    _scissor = vk::Rect2D{ vk::Offset2D{ 0, 0 }, _swapChainExtent };
+    vk::Extent2D swapChainExtent{ _swapChain->GetExtent() };
+    _viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f };
+    _scissor = vk::Rect2D{ vk::Offset2D{ 0, 0 }, swapChainExtent };
 
     std::vector<vk::DynamicState> dynamicStates = {
             vk::DynamicState::eViewport,
@@ -604,7 +495,7 @@ void Engine::CreateGraphicsPipeline()
 void Engine::CreateRenderPass()
 {
     vk::AttachmentDescription colorAttachment{};
-    colorAttachment.format = _swapChainFormat;
+    colorAttachment.format = _swapChain->GetFormat();
     colorAttachment.samples = vk::SampleCountFlagBits::e1;
     colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
     colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
@@ -641,26 +532,6 @@ void Engine::CreateRenderPass()
     util::VK_ASSERT(_device.createRenderPass(&renderPassCreateInfo, nullptr, &_renderPass), "Failed creating the render pass!");
 }
 
-void Engine::CreateFrameBuffers()
-{
-    _swapChainFrameBuffers.resize(_swapChainImageViews.size());
-
-    for(size_t i = 0; i < _swapChainImageViews.size(); ++i)
-    {
-        vk::ImageView attachments[] = { _swapChainImageViews[i] };
-        vk::FramebufferCreateInfo framebufferCreateInfo{};
-        framebufferCreateInfo.renderPass = _renderPass;
-        framebufferCreateInfo.attachmentCount = 1;
-        framebufferCreateInfo.pAttachments = attachments;
-        framebufferCreateInfo.width = _swapChainExtent.width;
-        framebufferCreateInfo.height = _swapChainExtent.height;
-        framebufferCreateInfo.layers = 1;
-
-        util::VK_ASSERT(_device.createFramebuffer(&framebufferCreateInfo, nullptr, &_swapChainFrameBuffers[i]), "Failed creating frame buffer!");
-    }
-
-}
-
 void Engine::CreateCommandPool()
 {
     QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
@@ -689,8 +560,8 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_
 
     vk::RenderPassBeginInfo renderPassBeginInfo{};
     renderPassBeginInfo.renderPass = _renderPass;
-    renderPassBeginInfo.framebuffer = _swapChainFrameBuffers[swapChainImageIndex];
-    renderPassBeginInfo.renderArea = vk::Rect2D{ vk::Offset2D{ 0, 0 }, _swapChainExtent };
+    renderPassBeginInfo.framebuffer = _swapChain->GetFrameBuffer(swapChainImageIndex);
+    renderPassBeginInfo.renderArea = vk::Rect2D{ vk::Offset2D{ 0, 0 }, _swapChain->GetExtent() };
 
     vk::ClearValue clearColor{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 1.0f }}};
     renderPassBeginInfo.clearValueCount = 1;

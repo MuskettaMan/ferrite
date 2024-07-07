@@ -6,42 +6,34 @@
 #include <chrono>
 #include <vulkan/vulkan.hpp>
 #include "class_decorations.hpp"
+#include "application.hpp"
+#include "swap_chain.hpp"
+#include <glm/glm.hpp>
+#include "engine_init_info.hpp"
+#include "performance_tracker.hpp"
+
+struct QueueFamilyIndices
+{
+    std::optional<uint32_t> graphicsFamily;
+    std::optional<uint32_t> presentFamily;
+
+    bool IsComplete()
+    {
+        return graphicsFamily.has_value() && presentFamily.has_value();
+    }
+};
 
 class Engine
 {
 public:
     const static uint32_t MAX_FRAMES_IN_FLIGHT{ 2 };
-    struct InitInfo
-    {
-        uint32_t extensionCount{ 0 };
-        const char** extensions{ nullptr };
-        uint32_t width, height;
-
-        std::function<vk::SurfaceKHR(vk::Instance)> retrieveSurface;
-        std::function<void()> newImGuiFrame;
-    };
-    struct QueueFamilyIndices
-    {
-        std::optional<uint32_t> graphicsFamily;
-        std::optional<uint32_t> presentFamily;
-
-        bool IsComplete()
-        {
-            return graphicsFamily.has_value() && presentFamily.has_value();
-        }
-    };
-    struct SwapChainSupportDetails
-    {
-        vk::SurfaceCapabilitiesKHR capabilities;
-        std::vector<vk::SurfaceFormatKHR> formats;
-        std::vector<vk::PresentModeKHR> presentModes;
-    };
 
     Engine();
+    ~Engine() = default;
     NON_COPYABLE(Engine);
     NON_MOVABLE(Engine);
 
-    void Init(const InitInfo& initInfo);
+    void Init(const InitInfo& initInfo, std::shared_ptr<Application> application);
     void Run();
     void Shutdown();
 
@@ -57,12 +49,7 @@ private:
     vk::Pipeline _pipeline;
     vk::DescriptorPool _descriptorPool;
 
-    vk::SwapchainKHR _swapChain;
-    std::vector<vk::Image> _swapChainImages;
-    std::vector<vk::ImageView> _swapChainImageViews;
-    std::vector<vk::Framebuffer> _swapChainFrameBuffers;
-    vk::Format _swapChainFormat;
-    vk::Extent2D _swapChainExtent;
+    std::unique_ptr<SwapChain> _swapChain;
 
     vk::CommandPool _commandPool;
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
@@ -78,13 +65,11 @@ private:
 
     std::function<void()> _newImGuiFrame;
 
+    std::shared_ptr<Application> _application;
+
     uint32_t _currentFrame{ 0 };
 
-    // Variables to store the time points
-    std::chrono::steady_clock::time_point _frameStart, _frameEnd;
-    std::chrono::duration<double> _frameDuration;
-    double _fps = 0.0;
-    double _msPerFrame = 0.0;
+    PerformanceTracker _performanceTracker;
 
     const std::vector<const char*> _validationLayers =
     {
@@ -111,15 +96,8 @@ private:
     bool ExtensionsSupported(const vk::PhysicalDevice& device);
     QueueFamilyIndices FindQueueFamilies(const vk::PhysicalDevice& device);
     void CreateDevice();
-    SwapChainSupportDetails QuerySwapChainSupport(const vk::PhysicalDevice& device);
-    void CreateSwapChain(const InitInfo& initInfo);
-    vk::SurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
-    vk::PresentModeKHR ChoosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
-    vk::Extent2D ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities, const InitInfo& initInfo);
-    void CreateSwapChainImageViews();
     void CreateGraphicsPipeline();
     void CreateRenderPass();
-    void CreateFrameBuffers();
     void CreateCommandPool();
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);

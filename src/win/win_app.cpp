@@ -1,5 +1,4 @@
 #include "win/win_app.hpp"
-#include "engine.hpp"
 #include "GLFW/glfw3.h"
 #include "vulkan_helper.hpp"
 #include "imgui/backends/win/imgui_impl_glfw.h"
@@ -29,10 +28,44 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
     _width = mode->width;
     _height = mode->height;
 
+    ImGui_ImplGlfw_InitForVulkan(_window, true);
+}
+
+void WinApp::Run(std::function<void()> updateLoop)
+{
+    while(!glfwWindowShouldClose(_window) || _quit)
+    {
+        glfwPollEvents();
+
+        int32_t width, height;
+        glfwGetWindowSize(_window, &width, &height);
+
+        _width = width;
+        _height = height;
+
+        updateLoop();
+    }
+}
+
+WinApp::~WinApp()
+{
+    ImGui_ImplGlfw_Shutdown();
+
+    glfwDestroyWindow(_window);
+    glfwTerminate();
+}
+
+glm::uvec2 WinApp::DisplaySize()
+{
+    return glm::uvec2(_width, _height);
+}
+
+InitInfo WinApp::GetInitInfo()
+{
     uint32_t glfwExtensionCount{ 0 };
     const char** glfwExtensions{ glfwGetRequiredInstanceExtensions(&glfwExtensionCount) };
 
-    Engine::InitInfo initInfo{ glfwExtensionCount, glfwExtensions };
+    InitInfo initInfo{ glfwExtensionCount, glfwExtensions };
     initInfo.width = _width;
     initInfo.height = _height;
     initInfo.retrieveSurface = [this](vk::Instance instance) {
@@ -42,28 +75,6 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
     };
     initInfo.newImGuiFrame = [](){ ImGui_ImplGlfw_NewFrame(); };
 
-    ImGui::CreateContext();
-
-    ImGui_ImplGlfw_InitForVulkan(_window, true);
-
-    _engine->Init(initInfo);
+    return initInfo;
 }
 
-void WinApp::Run()
-{
-    while(!glfwWindowShouldClose(_window) || _quit)
-    {
-        glfwPollEvents();
-
-        _engine->Run();
-    }
-}
-
-WinApp::~WinApp()
-{
-    ImGui_ImplGlfw_Shutdown();
-    _engine->Shutdown();
-
-    glfwDestroyWindow(_window);
-    glfwTerminate();
-}
