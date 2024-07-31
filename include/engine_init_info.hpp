@@ -12,4 +12,5 @@ struct InitInfo
 
     std::function<vk::SurfaceKHR(vk::Instance)> retrieveSurface;
     std::function<void()> newImGuiFrame;
+    std::function<void()> shutdownImGui;
 };

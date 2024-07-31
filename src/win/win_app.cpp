@@ -49,8 +49,6 @@ void WinApp::Run(std::function<void()> updateLoop)
 
 WinApp::~WinApp()
 {
-    ImGui_ImplGlfw_Shutdown();
-
     glfwDestroyWindow(_window);
     glfwTerminate();
 }
@@ -73,7 +71,8 @@ InitInfo WinApp::GetInitInfo()
         util::VK_ASSERT(glfwCreateWindowSurface(instance, this->_window, nullptr, &surface), "Failed creating GLFW surface!");
         return vk::SurfaceKHR(surface);
     };
-    initInfo.newImGuiFrame = [](){ ImGui_ImplGlfw_NewFrame(); };
+    initInfo.newImGuiFrame = ImGui_ImplGlfw_NewFrame;
+    initInfo.shutdownImGui = ImGui_ImplGlfw_Shutdown;
 
     return initInfo;
 }

@@ -64,6 +64,7 @@ private:
     vk::DebugUtilsMessengerEXT _debugMessenger;
 
     std::function<void()> _newImGuiFrame;
+    std::function<void()> _shutdownImGui;
 
     std::shared_ptr<Application> _application;
 

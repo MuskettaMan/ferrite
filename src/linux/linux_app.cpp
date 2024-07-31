@@ -5,6 +5,10 @@
 #include <cassert>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_xcb.h>
+#include <X11/Xutil.h>
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
+#include <iostream>
 
 #include "vulkan_helper.hpp"
 #include "imgui/backends/linux/imgui_impl_xlib.h"
@@ -85,6 +89,11 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
     _wmDeleteMessage = XInternAtom(_display, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(_display, _window, &_wmDeleteMessage, 1);
 
+    _wmState = XInternAtom(_display, "WM_STATE", false);
+    _wmStateHidden = XInternAtom(_display, "_NET_WM_STATE_HIDDEN", false);
+
+    XSelectInput(_display, _window, PropertyChangeMask | StructureNotifyMask);
+
     xcb_map_window(_connection, _window);
     xcb_flush(_connection);
 
@@ -103,6 +112,60 @@ void LinuxApp::Run(std::function<void()> updateLoop)
 
             if(event.type == ClientMessage && event.xclient.window == _window && static_cast<Atom>(event.xclient.data.l[0]) == _wmDeleteMessage)
                 _quit = true;
+
+            // Check for window state changes.
+            if(event.type == PropertyNotify && event.xproperty.atom == _wmState)
+            {
+                Atom actualType;
+                int32_t actualFormat;
+                uint64_t numItems, bytesAfter;
+                uint8_t* propertyData{ nullptr };
+
+                if(XGetWindowProperty(_display, _window, _wmState, 0, 2, false, AnyPropertyType, &actualType, &actualFormat, &numItems, &bytesAfter, &propertyData) == Success)
+                {
+                    if(propertyData)
+                    {
+                        int64_t* state = reinterpret_cast<int64_t*>(propertyData);
+                        if(state[0] == IconicState)
+                        {
+                            std::cout << "Window minimized" << std::endl;
+                            // Maximized!
+                        }
+                        else if(state[0] == NormalState)
+                        {
+                            std::cout << "Window restored" << std::endl;
+                            // Window restored!
+                        }
+                        XFree(propertyData);
+                    }
+                }
+            }
+            else if(event.type == PropertyNotify && event.xproperty.atom == _wmStateHidden)
+            {
+                Atom actualType;
+                int32_t actualFormat;
+                uint64_t numItems, bytesAfter;
+                uint8_t* propertyData{ nullptr };
+
+                if(XGetWindowProperty(_display, _window, _wmStateHidden, 0, 2, false, XA_ATOM, &actualType, &actualFormat, &numItems, &bytesAfter, &propertyData) == Success)
+                {
+                    if(propertyData)
+                    {
+                        Atom* state = reinterpret_cast<Atom*>(propertyData);
+                        if(*state == _wmStateHidden)
+                        {
+                            std::cout << "Window hidden (possibly minimized)" << std::endl;
+                            // Window hidden.
+                        }
+                        else
+                        {
+                            std::cout << "Window visible" << std::endl;
+                            // Window visible.
+                        }
+                        XFree(propertyData);
+                    }
+                }
+            }
         }
 
         _width = _screen->width_in_pixels;
@@ -114,8 +177,6 @@ void LinuxApp::Run(std::function<void()> updateLoop)
 
 LinuxApp::~LinuxApp()
 {
-    ImGui_ImplXlib_Shutdown();
-
     xcb_destroy_window(_connection, _window);
     xcb_disconnect(_connection);
 }
@@ -144,7 +205,13 @@ InitInfo LinuxApp::GetInitInfo()
 
         return vk::SurfaceKHR{ surface };
     };
-    initInfo.newImGuiFrame = [](){ ImGui_ImplXlib_NewFrame(); };
+    initInfo.newImGuiFrame = ImGui_ImplXlib_NewFrame;
+    initInfo.shutdownImGui = ImGui_ImplXlib_Shutdown;
 
     return initInfo;
+}
+
+bool LinuxApp::IsMinimized()
+{
+    return false;
 }

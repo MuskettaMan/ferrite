@@ -49,6 +49,7 @@ void Engine::Init(const InitInfo& initInfo, std::shared_ptr<Application> applica
     CreateDescriptorPool();
 
     _newImGuiFrame = initInfo.newImGuiFrame;
+    _shutdownImGui = initInfo.shutdownImGui;
 
 
     ImGui_ImplVulkan_InitInfo initInfoVulkan{};
@@ -180,6 +181,7 @@ void Engine::Run()
 
 void Engine::Shutdown()
 {
+    _shutdownImGui();
     ImGui_ImplVulkan_Shutdown();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();

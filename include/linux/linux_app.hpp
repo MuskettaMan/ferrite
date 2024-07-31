@@ -12,12 +12,15 @@ public:
     void Run(std::function<void()> updateLoop) override;
     glm::uvec2 DisplaySize() override;
     InitInfo GetInitInfo() override;
+    bool IsMinimized() override;
 
 private:
     xcb_connection_t* _connection;
     xcb_screen_t* _screen;
     xcb_window_t _window;
     xcb_intern_atom_reply_t* _atomWmDeleteWindow;
+    Atom _wmState;
+    Atom _wmStateHidden;
     Display* _display;
     Atom _wmDeleteMessage;
 
