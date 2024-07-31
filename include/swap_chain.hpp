@@ -46,6 +46,9 @@ public:
     [[nodiscard]]
     vk::Format GetFormat() const { return _format; }
 
+    [[nodiscard]]
+    vk::Image GetImage(uint32_t index) const { return _images[index]; }
+
 private:
     vk::Device _device;
     vk::PhysicalDevice _physicalDevice;

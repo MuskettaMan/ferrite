@@ -34,6 +34,10 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment; // TODO: Can change this later to a memory transfer operation, when doing post-processing.
+    if(swapChainSupport.capabilities.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferSrc)
+        createInfo.imageUsage |= vk::ImageUsageFlagBits::eTransferSrc;
+    if(swapChainSupport.capabilities.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst)
+        createInfo.imageUsage |= vk::ImageUsageFlagBits::eTransferDst;
 
     uint32_t queueFamilyIndices[] = { familyIndices.graphicsFamily.value(), familyIndices.presentFamily.value() };
     if(familyIndices.graphicsFamily != familyIndices.presentFamily)
@@ -154,7 +158,7 @@ void SwapChain::CreateFrameBuffers(vk::RenderPass renderPass)
 
     for(size_t i = 0; i < _imageViews.size(); ++i)
     {
-        vk::ImageView attachments[] = {_imageViews[i] };
+        vk::ImageView attachments[] = { _imageViews[i] };
         vk::FramebufferCreateInfo framebufferCreateInfo{};
         framebufferCreateInfo.renderPass = renderPass;
         framebufferCreateInfo.attachmentCount = 1;

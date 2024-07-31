@@ -6,6 +6,8 @@
 #include <map>
 #include <set>
 #include <implot.h>
+#include <iomanip>
+#include <thread>
 
 #include "imgui.h"
 #include "engine.hpp"
@@ -13,6 +15,7 @@
 #include "vulkan_helper.hpp"
 #include "shaders/shader_loader.hpp"
 #include "imgui_impl_vulkan.h"
+#include "stopwatch.hpp"
 
 Engine::Engine()
 {
@@ -68,14 +71,35 @@ void Engine::Init(const InitInfo& initInfo, std::shared_ptr<Application> applica
 
 void Engine::Run()
 {
+    if(_application->IsMinimized())
+    {
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(16ms);
+        return;
+    }
+
+    static std::vector<PerformanceTracker::FrameData> frameData;
+    frameData.clear();
+
+    static Stopwatch stopwatch{};
+    stopwatch.start();
+
     util::VK_ASSERT(_device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()), "Failed waiting on in flight fence!");
 
-    _performanceTracker.Update();
+    stopwatch.stop();
+
+    frameData.emplace_back("Fence duration", stopwatch.elapsed_milliseconds());
+
+    stopwatch.start();
 
     uint32_t imageIndex;
     vk::Result result = _device.acquireNextImageKHR(_swapChain->GetSwapChain(), std::numeric_limits<uint64_t>::max(), _imageAvailableSemaphores[_currentFrame], nullptr, &imageIndex);
 
-    if(result == vk::Result::eErrorOutOfDateKHR)
+    stopwatch.stop();
+
+    frameData.emplace_back("Acquiring next image", stopwatch.elapsed_milliseconds());
+
+    if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
     {
         QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
         _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, familyIndices);
@@ -98,7 +122,12 @@ void Engine::Run()
 
     _commandBuffers[_currentFrame].reset();
 
+    stopwatch.start();
     RecordCommandBuffer(_commandBuffers[_currentFrame], imageIndex);
+    stopwatch.stop();
+
+    frameData.emplace_back("Recording command buffer", stopwatch.elapsed_milliseconds());
+
 
     vk::SubmitInfo submitInfo{};
     vk::Semaphore waitSemaphores[] = { _imageAvailableSemaphores[_currentFrame] };
@@ -124,7 +153,12 @@ void Engine::Run()
     presentInfo.pSwapchains = swapchains;
     presentInfo.pImageIndices = &imageIndex;
 
+    stopwatch.start();
     result = _presentQueue.presentKHR(&presentInfo);
+    stopwatch.stop();
+
+    frameData.emplace_back("Presenting", stopwatch.elapsed_milliseconds());
+
 
 
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
@@ -133,9 +167,15 @@ void Engine::Run()
         _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, familyIndices);
     }
     else
+    {
         util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
+    }
 
     _device.waitIdle();
+
+    _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+
+    _performanceTracker.Update(frameData);
 }
 
 void Engine::Shutdown()
@@ -517,9 +557,9 @@ void Engine::CreateRenderPass()
     dependency.srcSubpass = vk::SubpassExternal;
     dependency.dstSubpass = 0;
     dependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    dependency.srcAccessMask = vk::AccessFlagBits::eNone;
     dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+    dependency.srcAccessMask = vk::AccessFlagBits::eNone;
+    dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eColorAttachmentRead;
 
     vk::RenderPassCreateInfo renderPassCreateInfo{};
     renderPassCreateInfo.attachmentCount = 1;

@@ -19,6 +19,7 @@ public:
     Application(const CreateParameters& parameters);
     virtual InitInfo GetInitInfo() = 0;
     virtual glm::uvec2 DisplaySize() = 0;
+    virtual bool IsMinimized() = 0;
 
     NON_COPYABLE(Application);
     NON_MOVABLE(Application);

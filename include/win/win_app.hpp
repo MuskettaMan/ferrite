@@ -11,6 +11,7 @@ public:
     void Run(std::function<void()> updateLoop) override;
     glm::uvec2 DisplaySize() override;
     InitInfo GetInitInfo() override;
+    bool IsMinimized() override;
 
 private:
     GLFWwindow* _window;
