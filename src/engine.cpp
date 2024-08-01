@@ -43,6 +43,9 @@ void Engine::Init(const InitInfo& initInfo, std::shared_ptr<Application> applica
     CreateRenderPass();
     CreateGraphicsPipeline();
     _swapChain->CreateFrameBuffers(_renderPass);
+
+    CreateVertexBuffer();
+
     CreateCommandPool();
     CreateCommandBuffers();
     CreateSyncObjects();
@@ -201,6 +204,9 @@ void Engine::Shutdown()
     _device.destroy(_descriptorPool);
 
     _device.destroy(_commandPool);
+
+    _device.destroy(_vertexBuffer);
+    _device.freeMemory(_vertexBufferMemory);
 
     _device.destroy(_pipeline);
     _device.destroy(_pipelineLayout);
@@ -439,9 +445,14 @@ void Engine::CreateGraphicsPipeline()
 
     vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageCreateInfo, fragShaderStageCreateInfo };
 
+    auto bindingDesc = Vertex::GetBindingDescription();
+    auto attributes = Vertex::GetAttributeDescriptions();
+
     vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo{};
-    vertexInputStateCreateInfo.vertexBindingDescriptionCount = 0;
-    vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 0;
+    vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
+    vertexInputStateCreateInfo.pVertexBindingDescriptions = &bindingDesc;
+    vertexInputStateCreateInfo.vertexAttributeDescriptionCount = attributes.size();
+    vertexInputStateCreateInfo.pVertexAttributeDescriptions = attributes.data();
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo{};
     inputAssemblyStateCreateInfo.topology = vk::PrimitiveTopology::eTriangleList;
@@ -616,7 +627,11 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_
     commandBuffer.setViewport(0, 1, &_viewport);
     commandBuffer.setScissor(0, 1, &_scissor);
 
-    commandBuffer.draw(3, 1, 0, 0);
+    vk::Buffer vertexBuffers[] = { _vertexBuffer };
+    vk::DeviceSize offsets[] = { 0 };
+    commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+
+    commandBuffer.draw(_vertices.size(), 1, 0, 0);
 
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
 
@@ -640,6 +655,44 @@ void Engine::CreateSyncObjects()
     }
 }
 
+void Engine::CreateVertexBuffer()
+{
+    vk::BufferCreateInfo bufferInfo{};
+    bufferInfo.size = sizeof(Vertex) * _vertices.size();
+    bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
+    bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+    util::VK_ASSERT(_device.createBuffer(&bufferInfo, nullptr, &_vertexBuffer), "Failed creating vertex buffer!");
+
+    vk::MemoryRequirements memoryRequirements;
+    _device.getBufferMemoryRequirements(_vertexBuffer, &memoryRequirements);
+
+    vk::MemoryAllocateInfo allocateInfo{};
+    allocateInfo.allocationSize = memoryRequirements.size;
+    allocateInfo.memoryTypeIndex = FindMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+    util::VK_ASSERT(_device.allocateMemory(&allocateInfo, nullptr, &_vertexBufferMemory), "Failed allocating memory for the vertex buffer!");
+
+    _device.bindBufferMemory(_vertexBuffer, _vertexBufferMemory, 0);
+
+    void* data;
+    util::VK_ASSERT(_device.mapMemory(_vertexBufferMemory, 0, bufferInfo.size, vk::MemoryMapFlagBits::ePlacedEXT, &data), "Failed mapping memory!");
+    memcpy(data, _vertices.data(), bufferInfo.size);
+    _device.unmapMemory(_vertexBufferMemory);
+}
+
+uint32_t Engine::FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties)
+{
+    vk::PhysicalDeviceMemoryProperties memoryProperties;
+    _physicalDevice.getMemoryProperties(&memoryProperties);
+
+    for(uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
+        if(typeFilter & (1 << i) && (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties)
+            return i;
+
+    throw std::runtime_error("Failed finding suitable memory type!");
+}
+
 void Engine::CreateDescriptorPool()
 {
     std::vector<vk::DescriptorPoolSize> poolSizes = {
@@ -659,3 +712,4 @@ void Engine::CreateDescriptorPool()
     vk::DescriptorPoolCreateInfo createInfo{ vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1000, static_cast<uint32_t>(poolSizes.size()), poolSizes.data() };
     util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }
+

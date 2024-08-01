@@ -257,7 +257,7 @@ Putting it together</h1>
 <div class="line">    vec3 col;</div>
 <div class="line">} Vertex;</div>
 <div class="line"> </div>
-<div class="line"><span class="keyword">static</span> <span class="keyword">const</span> Vertex vertices[3] =</div>
+<div class="line"><span class="keyword">static</span> <span class="keyword">const</span> Vertex _vertices[3] =</div>
 <div class="line">{</div>
 <div class="line">    { { -0.6f, -0.4f }, { 1.f, 0.f, 0.f } },</div>
 <div class="line">    { {  0.6f, -0.4f }, { 0.f, 1.f, 0.f } },</div>
@@ -325,7 +325,7 @@ Putting it together</h1>
 <div class="line">    GLuint vertex_buffer;</div>
 <div class="line">    glGenBuffers(1, &amp;vertex_buffer);</div>
 <div class="line">    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);</div>
-<div class="line">    glBufferData(GL_ARRAY_BUFFER, <span class="keyword">sizeof</span>(vertices), vertices, GL_STATIC_DRAW);</div>
+<div class="line">    glBufferData(GL_ARRAY_BUFFER, <span class="keyword">sizeof</span>(_vertices), _vertices, GL_STATIC_DRAW);</div>
 <div class="line"> </div>
 <div class="line">    <span class="keyword">const</span> GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);</div>
 <div class="line">    glShaderSource(vertex_shader, 1, &amp;vertex_shader_text, NULL);</div>

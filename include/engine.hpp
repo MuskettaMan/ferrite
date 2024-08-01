@@ -23,6 +23,44 @@ struct QueueFamilyIndices
     }
 };
 
+struct Vertex
+{
+    enum Enumeration {
+        ePOSITION,
+        eCOLOR
+    };
+
+    glm::vec2 position;
+    glm::vec3 color;
+
+    static vk::VertexInputBindingDescription GetBindingDescription()
+    {
+        vk::VertexInputBindingDescription bindingDesc;
+        bindingDesc.binding = 0;
+        bindingDesc.stride = sizeof(Vertex);
+        bindingDesc.inputRate = vk::VertexInputRate::eVertex;
+
+        return bindingDesc;
+    }
+
+    static std::array<vk::VertexInputAttributeDescription, 2> GetAttributeDescriptions()
+    {
+        std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
+        attributeDescriptions[ePOSITION].binding = 0;
+        attributeDescriptions[ePOSITION].location = 0;
+        attributeDescriptions[ePOSITION].format = vk::Format::eR32G32Sfloat;
+        attributeDescriptions[ePOSITION].offset = offsetof(Vertex, position);
+
+        attributeDescriptions[eCOLOR].binding = 0;
+        attributeDescriptions[eCOLOR].location = 1;
+        attributeDescriptions[eCOLOR].format = vk::Format::eR32G32B32Sfloat;
+        attributeDescriptions[eCOLOR].offset = offsetof(Vertex, color);
+
+
+        return attributeDescriptions;
+    }
+};
+
 class Engine
 {
 public:
@@ -48,14 +86,14 @@ private:
     vk::RenderPass _renderPass;
     vk::Pipeline _pipeline;
     vk::DescriptorPool _descriptorPool;
-
-    std::unique_ptr<SwapChain> _swapChain;
-
     vk::CommandPool _commandPool;
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
-
     vk::Viewport _viewport;
     vk::Rect2D _scissor;
+    vk::Buffer _vertexBuffer;
+    vk::DeviceMemory _vertexBufferMemory;
+
+    std::unique_ptr<SwapChain> _swapChain;
 
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _imageAvailableSemaphores;
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _renderFinishedSemaphores;
@@ -71,6 +109,12 @@ private:
     uint32_t _currentFrame{ 0 };
 
     PerformanceTracker _performanceTracker;
+
+    const std::vector<Vertex> _vertices = {
+            { { 0.0f, -.5f }, { 1.0f, 0.0f, 0.0f } },
+            { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
+            { { -.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } }
+    };
 
     const std::vector<const char*> _validationLayers =
     {
@@ -104,6 +148,8 @@ private:
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
     void CreateSyncObjects();
     void CreateDescriptorPool();
+    void CreateVertexBuffer();
+    uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 
     void LogInstanceExtensions();
 
