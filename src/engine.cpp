@@ -43,10 +43,10 @@ void Engine::Init(const InitInfo& initInfo, std::shared_ptr<Application> applica
     CreateRenderPass();
     CreateGraphicsPipeline();
     _swapChain->CreateFrameBuffers(_renderPass);
+    CreateCommandPool();
 
     CreateVertexBuffer();
 
-    CreateCommandPool();
     CreateCommandBuffers();
     CreateSyncObjects();
     CreateDescriptorPool();
@@ -655,30 +655,79 @@ void Engine::CreateSyncObjects()
     }
 }
 
-void Engine::CreateVertexBuffer()
+void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& bufferMemory)
 {
     vk::BufferCreateInfo bufferInfo{};
-    bufferInfo.size = sizeof(Vertex) * _vertices.size();
-    bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
 
-    util::VK_ASSERT(_device.createBuffer(&bufferInfo, nullptr, &_vertexBuffer), "Failed creating vertex buffer!");
+    util::VK_ASSERT(_device.createBuffer(&bufferInfo, nullptr, &buffer), "Failed creating vertex buffer!");
 
     vk::MemoryRequirements memoryRequirements;
-    _device.getBufferMemoryRequirements(_vertexBuffer, &memoryRequirements);
+    _device.getBufferMemoryRequirements(buffer, &memoryRequirements);
 
     vk::MemoryAllocateInfo allocateInfo{};
     allocateInfo.allocationSize = memoryRequirements.size;
-    allocateInfo.memoryTypeIndex = FindMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    allocateInfo.memoryTypeIndex = FindMemoryType(memoryRequirements.memoryTypeBits, properties);
 
-    util::VK_ASSERT(_device.allocateMemory(&allocateInfo, nullptr, &_vertexBufferMemory), "Failed allocating memory for the vertex buffer!");
+    util::VK_ASSERT(_device.allocateMemory(&allocateInfo, nullptr, &bufferMemory), "Failed allocating memory for the vertex buffer!");
 
-    _device.bindBufferMemory(_vertexBuffer, _vertexBufferMemory, 0);
+    _device.bindBufferMemory(buffer, bufferMemory, 0);
+}
+
+void Engine::CreateVertexBuffer()
+{
+    vk::DeviceSize bufferSize = sizeof(Vertex) * _vertices.size();
+
+    vk::Buffer stagingBuffer;
+    vk::DeviceMemory stagingBufferMemory;
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, stagingBuffer, stagingBufferMemory);
 
     void* data;
-    util::VK_ASSERT(_device.mapMemory(_vertexBufferMemory, 0, bufferInfo.size, vk::MemoryMapFlagBits::ePlacedEXT, &data), "Failed mapping memory!");
-    memcpy(data, _vertices.data(), bufferInfo.size);
-    _device.unmapMemory(_vertexBufferMemory);
+    vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+    memcpy(data, _vertices.data(), static_cast<size_t>(bufferSize));
+    vkUnmapMemory(_device, stagingBufferMemory);
+
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal, _vertexBuffer, _vertexBufferMemory);
+
+    CopyBuffer(stagingBuffer, _vertexBuffer, bufferSize);
+
+    _device.destroy(stagingBuffer, nullptr);
+    _device.freeMemory(stagingBufferMemory, nullptr);
+}
+
+void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size)
+{
+    vk::CommandBufferAllocateInfo allocateInfo{};
+    allocateInfo.level = vk::CommandBufferLevel::ePrimary;
+    allocateInfo.commandPool = _commandPool;
+    allocateInfo.commandBufferCount = 1;
+
+    vk::CommandBuffer commandBuffer;
+    util::VK_ASSERT(_device.allocateCommandBuffers(&allocateInfo, &commandBuffer), "Failed allocating copy command buffer!");
+
+    vk::CommandBufferBeginInfo beginInfo{};
+    beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+
+    util::VK_ASSERT(commandBuffer.begin(&beginInfo), "Failed beginning command buffer!");
+
+    vk::BufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+    commandBuffer.copyBuffer(srcBuffer, dstBuffer, 1, &copyRegion);
+
+    commandBuffer.end();
+
+    vk::SubmitInfo submitInfo{};
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    util::VK_ASSERT(_graphicsQueue.submit(1, &submitInfo, nullptr), "Failed submitting copy buffer to queue!");
+    _graphicsQueue.waitIdle();
+
+    _device.free(_commandPool, commandBuffer);
 }
 
 uint32_t Engine::FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties)
