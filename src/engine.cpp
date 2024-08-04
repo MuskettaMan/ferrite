@@ -23,7 +23,7 @@ Engine::Engine()
     ImPlot::CreateContext();
 }
 
-void Engine::Init(const InitInfo& initInfo, std::shared_ptr<Application> application)
+void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> application)
 {
     _application = std::move(application);
 
@@ -46,6 +46,7 @@ void Engine::Init(const InitInfo& initInfo, std::shared_ptr<Application> applica
     CreateCommandPool();
 
     CreateVertexBuffer();
+    CreateIndexBuffer();
 
     CreateCommandBuffers();
     CreateSyncObjects();
@@ -88,7 +89,8 @@ void Engine::Run()
     static Stopwatch stopwatch{};
     stopwatch.start();
 
-    util::VK_ASSERT(_device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()), "Failed waiting on in flight fence!");
+    util::VK_ASSERT(_device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()),
+                    "Failed waiting on in flight fence!");
 
     stopwatch.stop();
 
@@ -97,7 +99,8 @@ void Engine::Run()
     stopwatch.start();
 
     uint32_t imageIndex;
-    vk::Result result = _device.acquireNextImageKHR(_swapChain->GetSwapChain(), std::numeric_limits<uint64_t>::max(), _imageAvailableSemaphores[_currentFrame], nullptr, &imageIndex);
+    vk::Result result = _device.acquireNextImageKHR(_swapChain->GetSwapChain(), std::numeric_limits<uint64_t>::max(),
+                                                    _imageAvailableSemaphores[_currentFrame], nullptr, &imageIndex);
 
     stopwatch.stop();
 
@@ -108,8 +111,7 @@ void Engine::Run()
         QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
         _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, familyIndices);
         return;
-    }
-    else
+    } else
         util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
 
     _device.resetFences(1, &_inFlightFences[_currentFrame]);
@@ -164,13 +166,10 @@ void Engine::Run()
     frameData.emplace_back("Presenting", stopwatch.elapsed_milliseconds());
 
 
-
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
     {
-        QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
-        _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, familyIndices);
-    }
-    else
+        _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, _queueFamilyIndices);
+    } else
     {
         util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
     }
@@ -204,9 +203,13 @@ void Engine::Shutdown()
     _device.destroy(_descriptorPool);
 
     _device.destroy(_commandPool);
+    _device.destroy(_transferCommandPool);
 
     _device.destroy(_vertexBuffer);
     _device.freeMemory(_vertexBufferMemory);
+
+    _device.destroy(_indexBuffer);
+    _device.freeMemory(_indexBufferMemory);
 
     _device.destroy(_pipeline);
     _device.destroy(_pipelineLayout);
@@ -217,20 +220,21 @@ void Engine::Shutdown()
     _instance.destroy();
 }
 
-void Engine::CreateInstance(const InitInfo& initInfo)
+void Engine::CreateInstance(const InitInfo &initInfo)
 {
     CheckValidationLayerSupport();
     if(_enableValidationLayers && !CheckValidationLayerSupport())
         throw std::runtime_error("Validation layers requested, but not supported!");
 
-    vk::ApplicationInfo appInfo{ "", vk::makeApiVersion(0, 0, 0, 0), "No engine", vk::makeApiVersion(0, 1, 0, 0), vk::makeApiVersion(0, 1, 0, 0) };
+    vk::ApplicationInfo appInfo{ "", vk::makeApiVersion(0, 0, 0, 0), "No engine", vk::makeApiVersion(0, 1, 0, 0),
+                                 vk::makeApiVersion(0, 1, 0, 0) };
 
     auto extensions = GetRequiredExtensions(initInfo);
     vk::InstanceCreateInfo createInfo{
-        vk::InstanceCreateFlags{},
-        &appInfo,
-        0, nullptr,                                                 // Validation layers.
-        static_cast<uint32_t>(extensions.size()), extensions.data() // Extensions.
+            vk::InstanceCreateFlags{},
+            &appInfo,
+            0, nullptr,                                                 // Validation layers.
+            static_cast<uint32_t>(extensions.size()), extensions.data() // Extensions.
     };
 
     vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
@@ -240,9 +244,8 @@ void Engine::CreateInstance(const InitInfo& initInfo)
         createInfo.ppEnabledLayerNames = _validationLayers.data();
 
         util::PopulateDebugMessengerCreateInfo(debugCreateInfo);
-        createInfo.pNext = static_cast<vk::DebugUtilsMessengerCreateInfoEXT*>(&debugCreateInfo);
-    }
-    else
+        createInfo.pNext = static_cast<vk::DebugUtilsMessengerCreateInfoEXT *>(&debugCreateInfo);
+    } else
     {
         createInfo.enabledLayerCount = 0;
         createInfo.pNext = nullptr;
@@ -254,9 +257,10 @@ void Engine::CreateInstance(const InitInfo& initInfo)
 bool Engine::CheckValidationLayerSupport()
 {
     std::vector<vk::LayerProperties> availableLayers = vk::enumerateInstanceLayerProperties();
-    bool result = std::all_of(_validationLayers.begin(), _validationLayers.end(), [&availableLayers](const auto& layerName)
+    bool result = std::all_of(_validationLayers.begin(), _validationLayers.end(), [&availableLayers](const auto &layerName)
     {
-        const auto it = std::find_if(availableLayers.begin(), availableLayers.end(), [&layerName](const auto& layer){ return strcmp(layerName, layer.layerName) == 0; });
+        const auto it = std::find_if(availableLayers.begin(), availableLayers.end(), [&layerName](const auto &layer)
+        { return strcmp(layerName, layer.layerName) == 0; });
 
         return it != availableLayers.end();
     });
@@ -269,13 +273,13 @@ void Engine::LogInstanceExtensions()
     std::vector<vk::ExtensionProperties> extensions = vk::enumerateInstanceExtensionProperties();
 
     std::cout << "Available extensions: \n";
-    for(const auto& extension : extensions)
+    for(const auto &extension: extensions)
         std::cout << '\t' << extension.extensionName << '\n';
 }
 
-std::vector<const char*> Engine::GetRequiredExtensions(const InitInfo& initInfo)
+std::vector<const char *> Engine::GetRequiredExtensions(const InitInfo &initInfo)
 {
-    std::vector<const char*> extensions(initInfo.extensions, initInfo.extensions + initInfo.extensionCount);
+    std::vector<const char *> extensions(initInfo.extensions, initInfo.extensions + initInfo.extensionCount);
     if(_enableValidationLayers)
         extensions.emplace_back(vk::EXTDebugUtilsExtensionName);
 
@@ -291,7 +295,8 @@ void Engine::SetupDebugMessenger()
     util::PopulateDebugMessengerCreateInfo(createInfo);
     createInfo.pUserData = nullptr;
 
-    util::VK_ASSERT(util::CreateDebugUtilsMessengerEXT(_instance, &createInfo, nullptr, &_debugMessenger), "Failed to create debug messenger!");
+    util::VK_ASSERT(util::CreateDebugUtilsMessengerEXT(_instance, &createInfo, nullptr, &_debugMessenger),
+                    "Failed to create debug messenger!");
 }
 
 void Engine::PickPhysicalDevice()
@@ -302,7 +307,7 @@ void Engine::PickPhysicalDevice()
 
     std::multimap<int, vk::PhysicalDevice> candidates{};
 
-    for(const auto& device : devices)
+    for(const auto &device: devices)
     {
         uint32_t score = RateDeviceSuitability(device);
         if(score > 0)
@@ -314,7 +319,7 @@ void Engine::PickPhysicalDevice()
     _physicalDevice = candidates.rbegin()->second;
 }
 
-uint32_t Engine::RateDeviceSuitability(const vk::PhysicalDevice& device)
+uint32_t Engine::RateDeviceSuitability(const vk::PhysicalDevice &device)
 {
     vk::PhysicalDeviceProperties deviceProperties;
     vk::PhysicalDeviceFeatures deviceFeatures;
@@ -323,7 +328,7 @@ uint32_t Engine::RateDeviceSuitability(const vk::PhysicalDevice& device)
 
     QueueFamilyIndices familyIndices = FindQueueFamilies(device);
 
-    uint32_t score{0};
+    uint32_t score{ 0 };
 
     // Failed if geometry shader is not supported.
     if(!deviceFeatures.geometryShader)
@@ -352,54 +357,65 @@ uint32_t Engine::RateDeviceSuitability(const vk::PhysicalDevice& device)
     return score;
 }
 
-bool Engine::ExtensionsSupported(const vk::PhysicalDevice& device)
+bool Engine::ExtensionsSupported(const vk::PhysicalDevice &device)
 {
     std::vector<vk::ExtensionProperties> availableExtensions = device.enumerateDeviceExtensionProperties();
     std::set<std::string> requiredExtensions{ _deviceExtensions.begin(), _deviceExtensions.end() };
-    for(const auto& extension : availableExtensions)
+    for(const auto &extension: availableExtensions)
         requiredExtensions.erase(extension.extensionName);
 
     return requiredExtensions.empty();
 }
 
-QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const& device)
+QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const &device)
 {
     QueueFamilyIndices indices{};
 
-    uint32_t queueFamilyCount{0};
+    uint32_t queueFamilyCount{ 0 };
     device.getQueueFamilyProperties(&queueFamilyCount, nullptr);
 
-    std::vector<vk::QueueFamilyProperties> queueFamilies(queueFamilyCount);
+    std::vector <vk::QueueFamilyProperties> queueFamilies(queueFamilyCount);
     device.getQueueFamilyProperties(&queueFamilyCount, queueFamilies.data());
 
     for(size_t i = 0; i < queueFamilies.size(); ++i)
     {
-        if (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
+        if(queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
             indices.graphicsFamily = i;
 
-        vk::Bool32 supported;
-        util::VK_ASSERT(device.getSurfaceSupportKHR(i, _surface, &supported), "Failed querying surface support on physical device!");
-        if(supported)
-            indices.presentFamily = i;
+        if(queueFamilies[i].queueFlags & vk::QueueFlagBits::eTransfer && !(queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics))
+            indices.tranferFamily = i;
+
+        if(!indices.presentFamily.has_value())
+        {
+            vk::Bool32 supported;
+            util::VK_ASSERT(device.getSurfaceSupportKHR(i, _surface, &supported),
+                            "Failed querying surface support on physical device!");
+            if(supported)
+                indices.presentFamily = i;
+        }
 
         if(indices.IsComplete())
             break;
     }
+
+    if(!indices.tranferFamily.has_value())
+        indices.tranferFamily = indices.graphicsFamily;
 
     return indices;
 }
 
 void Engine::CreateDevice()
 {
-    QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
+    _queueFamilyIndices = FindQueueFamilies(_physicalDevice);
     vk::PhysicalDeviceFeatures deviceFeatures;
     _physicalDevice.getFeatures(&deviceFeatures);
 
-    std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos{};
-    std::set<uint32_t> uniqueQueueFamilies = { familyIndices.graphicsFamily.value(), familyIndices.presentFamily.value() };
+    std::vector <vk::DeviceQueueCreateInfo> queueCreateInfos{};
+    std::set <uint32_t> uniqueQueueFamilies = { _queueFamilyIndices.graphicsFamily.value(), _queueFamilyIndices.presentFamily.value(),
+                                                _queueFamilyIndices.tranferFamily.value() };
     float queuePriority{ 1.0f };
 
-    for(uint32_t familyQueueIndex : uniqueQueueFamilies)
+    for(uint32_t familyQueueIndex: uniqueQueueFamilies)
         queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags{}, familyQueueIndex, 1, &queuePriority);
 
     vk::DeviceCreateInfo createInfo{};
@@ -421,8 +437,9 @@ void Engine::CreateDevice()
 
     util::VK_ASSERT(_physicalDevice.createDevice(&createInfo, nullptr, &_device), "Failed creating a logical device!");
 
-    _device.getQueue(familyIndices.graphicsFamily.value(), 0, &_graphicsQueue);
-    _device.getQueue(familyIndices.presentFamily.value(), 0, &_presentQueue);
+    _device.getQueue(_queueFamilyIndices.graphicsFamily.value(), 0, &_graphicsQueue);
+    _device.getQueue(_queueFamilyIndices.presentFamily.value(), 0, &_presentQueue);
+    _device.getQueue(_queueFamilyIndices.tranferFamily.value(), 0, &_transferQueue);
 }
 
 void Engine::CreateGraphicsPipeline()
@@ -459,7 +476,8 @@ void Engine::CreateGraphicsPipeline()
     inputAssemblyStateCreateInfo.primitiveRestartEnable = vk::False;
 
     vk::Extent2D swapChainExtent{ _swapChain->GetExtent() };
-    _viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f };
+    _viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f,
+                              1.0f };
     _scissor = vk::Rect2D{ vk::Offset2D{ 0, 0 }, swapChainExtent };
 
     std::vector<vk::DynamicState> dynamicStates = {
@@ -497,7 +515,9 @@ void Engine::CreateGraphicsPipeline()
 
     vk::PipelineColorBlendAttachmentState colorBlendAttachmentState{};
     colorBlendAttachmentState.blendEnable = vk::False;
-    colorBlendAttachmentState.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+    colorBlendAttachmentState.colorWriteMask =
+            vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
+            vk::ColorComponentFlagBits::eA;
     colorBlendAttachmentState.srcColorBlendFactor = vk::BlendFactor::eOne;
     colorBlendAttachmentState.dstColorBlendFactor = vk::BlendFactor::eZero;
     colorBlendAttachmentState.colorBlendOp = vk::BlendOp::eAdd;
@@ -518,7 +538,8 @@ void Engine::CreateGraphicsPipeline()
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
     pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-    util::VK_ASSERT(_device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_pipelineLayout), "Failed creating a pipeline layout!");
+    util::VK_ASSERT(_device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_pipelineLayout),
+                    "Failed creating a pipeline layout!");
 
     vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo{};
     graphicsPipelineCreateInfo.stageCount = 2;
@@ -587,13 +608,17 @@ void Engine::CreateRenderPass()
 
 void Engine::CreateCommandPool()
 {
-    QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
-
     vk::CommandPoolCreateInfo commandPoolCreateInfo{};
     commandPoolCreateInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
-    commandPoolCreateInfo.queueFamilyIndex = familyIndices.graphicsFamily.value();
+    commandPoolCreateInfo.queueFamilyIndex = _queueFamilyIndices.graphicsFamily.value();
 
     util::VK_ASSERT(_device.createCommandPool(&commandPoolCreateInfo, nullptr, &_commandPool), "Failed creating command pool!");
+
+    vk::CommandPoolCreateInfo transferCommandPoolCreateInfo{};
+    transferCommandPoolCreateInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
+    transferCommandPoolCreateInfo.queueFamilyIndex = _queueFamilyIndices.tranferFamily.value();
+
+    util::VK_ASSERT(_device.createCommandPool(&transferCommandPoolCreateInfo, nullptr, &_transferCommandPool), "Failed creating transfer command pool!");
 }
 
 void Engine::CreateCommandBuffers()
@@ -603,10 +628,11 @@ void Engine::CreateCommandBuffers()
     commandBufferAllocateInfo.level = vk::CommandBufferLevel::ePrimary;
     commandBufferAllocateInfo.commandBufferCount = _commandBuffers.size();
 
-    util::VK_ASSERT(_device.allocateCommandBuffers(&commandBufferAllocateInfo, _commandBuffers.data()), "Failed allocating command buffer!");
+    util::VK_ASSERT(_device.allocateCommandBuffers(&commandBufferAllocateInfo, _commandBuffers.data()),
+                    "Failed allocating command buffer!");
 }
 
-void Engine::RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex)
+void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_t swapChainImageIndex)
 {
     vk::CommandBufferBeginInfo commandBufferBeginInfo{};
     util::VK_ASSERT(commandBuffer.begin(&commandBufferBeginInfo), "Failed to begin recording command buffer!");
@@ -630,8 +656,9 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_
     vk::Buffer vertexBuffers[] = { _vertexBuffer };
     vk::DeviceSize offsets[] = { 0 };
     commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+    commandBuffer.bindIndexBuffer(_indexBuffer, 0, vk::IndexType::eUint16);
 
-    commandBuffer.draw(_vertices.size(), 1, 0, 0);
+    commandBuffer.drawIndexed(_indices.size(), 1, 0, 0, 0);
 
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
 
@@ -655,12 +682,16 @@ void Engine::CreateSyncObjects()
     }
 }
 
-void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& bufferMemory)
+void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer &buffer,
+                          vk::DeviceMemory &bufferMemory)
 {
     vk::BufferCreateInfo bufferInfo{};
     bufferInfo.size = size;
     bufferInfo.usage = usage;
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+    bufferInfo.queueFamilyIndexCount = 2;
+    std::array<uint32_t, 2> concurrentFamilies = { _queueFamilyIndices.graphicsFamily.value(), _queueFamilyIndices.tranferFamily.value() };
+    bufferInfo.pQueueFamilyIndices = concurrentFamilies.data();
 
     util::VK_ASSERT(_device.createBuffer(&bufferInfo, nullptr, &buffer), "Failed creating vertex buffer!");
 
@@ -682,16 +713,46 @@ void Engine::CreateVertexBuffer()
 
     vk::Buffer stagingBuffer;
     vk::DeviceMemory stagingBufferMemory;
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, stagingBuffer, stagingBufferMemory);
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+                 vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, stagingBuffer, stagingBufferMemory);
 
-    void* data;
-    vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+    void *data;
+    _device.mapMemory(stagingBufferMemory, 0, bufferSize, vk::MemoryMapFlags{ 0 }, &data);
     memcpy(data, _vertices.data(), static_cast<size_t>(bufferSize));
-    vkUnmapMemory(_device, stagingBufferMemory);
+    _device.unmapMemory(stagingBufferMemory);
 
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal, _vertexBuffer, _vertexBufferMemory);
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+                 vk::MemoryPropertyFlagBits::eDeviceLocal, _vertexBuffer, _vertexBufferMemory);
 
     CopyBuffer(stagingBuffer, _vertexBuffer, bufferSize);
+
+    _device.destroy(stagingBuffer, nullptr);
+    _device.freeMemory(stagingBufferMemory, nullptr);
+}
+
+void Engine::CreateIndexBuffer()
+{
+    vk::DeviceSize bufferSize = sizeof(_indices[0]) * _indices.size();
+
+
+    vk::Buffer stagingBuffer;
+    vk::DeviceMemory stagingBufferMemory;
+    CreateBuffer(bufferSize,
+                 vk::BufferUsageFlagBits::eTransferSrc,
+                 vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                 stagingBuffer, stagingBufferMemory);
+
+    void* data;
+    _device.mapMemory(stagingBufferMemory, 0, bufferSize, vk::MemoryMapFlags{ 0 }, &data);
+    memcpy(data, _indices.data(), static_cast<size_t>(bufferSize));
+    _device.unmapMemory(stagingBufferMemory);
+
+    CreateBuffer(bufferSize,
+                 vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+                 vk::MemoryPropertyFlagBits::eDeviceLocal,
+                 _indexBuffer, _indexBufferMemory);
+
+    CopyBuffer(stagingBuffer, _indexBuffer, bufferSize);
 
     _device.destroy(stagingBuffer, nullptr);
     _device.freeMemory(stagingBufferMemory, nullptr);
@@ -701,7 +762,7 @@ void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSi
 {
     vk::CommandBufferAllocateInfo allocateInfo{};
     allocateInfo.level = vk::CommandBufferLevel::ePrimary;
-    allocateInfo.commandPool = _commandPool;
+    allocateInfo.commandPool = _transferCommandPool;
     allocateInfo.commandBufferCount = 1;
 
     vk::CommandBuffer commandBuffer;
@@ -724,10 +785,10 @@ void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSi
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    util::VK_ASSERT(_graphicsQueue.submit(1, &submitInfo, nullptr), "Failed submitting copy buffer to queue!");
-    _graphicsQueue.waitIdle();
+    util::VK_ASSERT(_transferQueue.submit(1, &submitInfo, nullptr), "Failed submitting copy buffer to queue!");
+    _transferQueue.waitIdle();
 
-    _device.free(_commandPool, commandBuffer);
+    _device.free(_transferCommandPool, commandBuffer);
 }
 
 uint32_t Engine::FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties)
@@ -745,20 +806,20 @@ uint32_t Engine::FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags pro
 void Engine::CreateDescriptorPool()
 {
     std::vector<vk::DescriptorPoolSize> poolSizes = {
-            {vk::DescriptorType::eSampler, 1000},
-            {vk::DescriptorType::eCombinedImageSampler, 1000},
-            {vk::DescriptorType::eSampledImage, 1000},
-            {vk::DescriptorType::eStorageImage, 1000},
-            {vk::DescriptorType::eUniformTexelBuffer, 1000},
-            {vk::DescriptorType::eStorageTexelBuffer, 1000},
-            {vk::DescriptorType::eUniformBuffer, 1000},
-            {vk::DescriptorType::eStorageBuffer, 1000},
-            {vk::DescriptorType::eUniformBufferDynamic, 1000},
-            {vk::DescriptorType::eStorageBufferDynamic, 1000},
-            {vk::DescriptorType::eInputAttachment, 1000}
+            { vk::DescriptorType::eSampler,              1000 },
+            { vk::DescriptorType::eCombinedImageSampler, 1000 },
+            { vk::DescriptorType::eSampledImage,         1000 },
+            { vk::DescriptorType::eStorageImage,         1000 },
+            { vk::DescriptorType::eUniformTexelBuffer,   1000 },
+            { vk::DescriptorType::eStorageTexelBuffer,   1000 },
+            { vk::DescriptorType::eUniformBuffer,        1000 },
+            { vk::DescriptorType::eStorageBuffer,        1000 },
+            { vk::DescriptorType::eUniformBufferDynamic, 1000 },
+            { vk::DescriptorType::eStorageBufferDynamic, 1000 },
+            { vk::DescriptorType::eInputAttachment,      1000 }
     };
 
-    vk::DescriptorPoolCreateInfo createInfo{ vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1000, static_cast<uint32_t>(poolSizes.size()), poolSizes.data() };
+    vk::DescriptorPoolCreateInfo createInfo{ vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1000,
+                                             static_cast<uint32_t>(poolSizes.size()), poolSizes.data() };
     util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }
-

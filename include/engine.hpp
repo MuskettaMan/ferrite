@@ -16,10 +16,11 @@ struct QueueFamilyIndices
 {
     std::optional<uint32_t> graphicsFamily;
     std::optional<uint32_t> presentFamily;
+    std::optional<uint32_t> tranferFamily;
 
     bool IsComplete()
     {
-        return graphicsFamily.has_value() && presentFamily.has_value();
+        return graphicsFamily.has_value() && presentFamily.has_value() && tranferFamily.has_value();
     }
 };
 
@@ -81,19 +82,25 @@ private:
     vk::Device _device;
     vk::Queue _graphicsQueue;
     vk::Queue _presentQueue;
+    vk::Queue _transferQueue;
     vk::SurfaceKHR _surface;
     vk::PipelineLayout _pipelineLayout;
     vk::RenderPass _renderPass;
     vk::Pipeline _pipeline;
     vk::DescriptorPool _descriptorPool;
     vk::CommandPool _commandPool;
+    vk::CommandPool _transferCommandPool;
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
     vk::Viewport _viewport;
     vk::Rect2D _scissor;
     vk::Buffer _vertexBuffer;
     vk::DeviceMemory _vertexBufferMemory;
+    vk::Buffer _indexBuffer;
+    vk::DeviceMemory _indexBufferMemory;
 
     std::unique_ptr<SwapChain> _swapChain;
+
+    QueueFamilyIndices _queueFamilyIndices;
 
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _imageAvailableSemaphores;
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _renderFinishedSemaphores;
@@ -111,10 +118,12 @@ private:
     PerformanceTracker _performanceTracker;
 
     const std::vector<Vertex> _vertices = {
-            { { 0.0f, -.5f }, { 1.0f, 0.0f, 0.0f } },
-            { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
-            { { -.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } }
+            { { -.5f, -.5f }, { 1.0f, 0.0f, 0.0f } },
+            { { 0.5f, -.5f }, { 0.0f, 1.0f, 0.0f } },
+            { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+            { { -.5f, 0.5f }, { 1.0f, 1.0f, 1.0f } }
     };
+    const std::vector<uint16_t> _indices = { 0, 1, 2, 2, 3, 0 };
 
     const std::vector<const char*> _validationLayers =
     {
@@ -150,6 +159,7 @@ private:
     void CreateDescriptorPool();
     void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& bufferMemory);
     void CreateVertexBuffer();
+    void CreateIndexBuffer();
     void CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
     uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 
