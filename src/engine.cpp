@@ -76,6 +76,7 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
 
 void Engine::Run()
 {
+    // Slow down application when minimized.
     if(_application->IsMinimized())
     {
         using namespace std::chrono_literals;
@@ -116,6 +117,7 @@ void Engine::Run()
 
     _device.resetFences(1, &_inFlightFences[_currentFrame]);
 
+    stopwatch.start();
 
     ImGui_ImplVulkan_NewFrame();
     _newImGuiFrame();
@@ -127,6 +129,9 @@ void Engine::Run()
     ImGui::Render();
 
     _commandBuffers[_currentFrame].reset();
+    stopwatch.stop();
+
+    frameData.emplace_back("Rendering ImGui", stopwatch.elapsed_milliseconds());
 
     stopwatch.start();
     RecordCommandBuffer(_commandBuffers[_currentFrame], imageIndex);
@@ -348,9 +353,13 @@ uint32_t Engine::RateDeviceSuitability(const vk::PhysicalDevice &device)
     if(swapChainUnsupported)
         return 0;
 
-    // Favor integrated GPUs above all else.
+    // Favor discrete GPUs above all else.
     if(deviceProperties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
-        score += 10000;
+        score += 50000;
+
+    // Slightly favor integrated GPUs.
+    if(deviceProperties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu)
+        score += 30000;
 
     score += deviceProperties.limits.maxImageDimension2D;
 

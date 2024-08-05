@@ -16,7 +16,7 @@ int main()
 {
     g_engine = std::make_shared<Engine>();
 
-    Application::CreateParameters parameters{ "Vulkan", false };
+    Application::CreateParameters parameters{ "Vulkan", true };
 
 #if defined(WINDOWS)
     g_app = std::make_shared<WinApp>(parameters);

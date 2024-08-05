@@ -3,6 +3,7 @@
 #include "implot.h"
 #include <algorithm>
 #include <iostream>
+#include <string>
 
 PerformanceTracker::PerformanceTracker()
 {

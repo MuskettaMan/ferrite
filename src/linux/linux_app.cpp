@@ -67,10 +67,25 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
     _atomWmDeleteWindow = intern_atom_helper(_connection, false, "WM_DELETE_WINDOW");
 
     xcb_change_property(_connection, XCB_PROP_MODE_REPLACE, _window, reply->atom, 4, 32, 1, &_atomWmDeleteWindow->atom);
+    free(reply);
 
     xcb_change_property(_connection, XCB_PROP_MODE_REPLACE, _window, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, _windowTitle.size(), _windowTitle.data());
 
-    free(reply);
+
+    // Disable vsync on window.
+    xcb_intern_atom_cookie_t cookie = xcb_intern_atom(_connection, 0, strlen("_NET_WM_BYPASS_COMPOSITOR"), "_NET_WM_BYPASS_COMPOSITOR");
+    reply = xcb_intern_atom_reply(_connection, cookie, NULL);
+
+    if (reply) {
+        xcb_atom_t net_wm_bypass_compositor = reply->atom;
+        uint32_t value = 1;  // 1 to enable bypass, 0 to disable
+
+        xcb_change_property(_connection, XCB_PROP_MODE_REPLACE, _window,
+                            net_wm_bypass_compositor, XCB_ATOM_CARDINAL, 32,
+                            1, &value);
+
+        free(reply);
+    }
 
     std::string wmClass;
     wmClass = wmClass.insert(0, _windowTitle);

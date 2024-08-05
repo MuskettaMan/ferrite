@@ -28,7 +28,7 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
 
     vk::SwapchainCreateInfoKHR createInfo{};
     createInfo.surface = _surface;
-    createInfo.minImageCount = imageCount;
+    createInfo.minImageCount = imageCount + 1;
     createInfo.imageFormat = surfaceFormat.format;
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
@@ -128,7 +128,7 @@ vk::SurfaceFormatKHR SwapChain::ChooseSwapSurfaceFormat(const std::vector<vk::Su
 vk::PresentModeKHR SwapChain::ChoosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes)
 {
     auto it = std::find_if(availablePresentModes.begin(), availablePresentModes.end(),
-                           [](const auto& mode) { return mode == vk::PresentModeKHR::eMailbox; });
+                           [](const auto& mode) { return mode == vk::PresentModeKHR::eImmediate; });
     if(it != availablePresentModes.end())
         return *it;
 
