@@ -110,10 +110,13 @@ private:
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
     vk::Viewport _viewport;
     vk::Rect2D _scissor;
+
     vk::Buffer _vertexBuffer;
     vk::DeviceMemory _vertexBufferMemory;
     vk::Buffer _indexBuffer;
     vk::DeviceMemory _indexBufferMemory;
+    vk::Image _image;
+    vk::DeviceMemory _imageMemory;
 
     std::unique_ptr<SwapChain> _swapChain;
 
@@ -182,6 +185,12 @@ private:
     void CreateUniformBuffers();
     void UpdateUniformData(uint32_t currentFrame);
     uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
+    void CreateTextureImage();
+    void CreateImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Image& image, vk::DeviceMemory& memory);
+    vk::CommandBuffer BeginSingleTimeCommands(vk::CommandPool& commandPool);
+    void EndSingleTimeCommands(vk::CommandBuffer commandBuffer, vk::Queue& queue, vk::CommandPool& commandPool);
+    void TransitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
+    void CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
 
     void LogInstanceExtensions();
     void CreateDescriptorPool();

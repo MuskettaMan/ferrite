@@ -152,6 +152,8 @@ target_include_directories(pi_vulkan PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 # END IMGUI
 
 
+include_directories("external/stb")
+
 # BUILD TYPE SETTINGS
 
 if(NOT CMAKE_BUILD_TYPE)
