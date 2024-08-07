@@ -79,7 +79,7 @@ InitInfo WinApp::GetInitInfo()
 
 bool WinApp::IsMinimized()
 {
-    int32_t result = glfwGetWindowAttrib(_window, GLFW_MAXIMIZED);
-    return !static_cast<bool>(result);
+    int32_t result = glfwGetWindowAttrib(_window, GLFW_ICONIFIED);
+    return static_cast<bool>(result);
 }
 
