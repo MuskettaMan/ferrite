@@ -28,11 +28,13 @@ struct Vertex
 {
     enum Enumeration {
         ePOSITION,
-        eCOLOR
+        eCOLOR,
+        eTEX_COORD
     };
 
     glm::vec2 position;
     glm::vec3 color;
+    glm::vec2 texCoord;
 
     static vk::VertexInputBindingDescription GetBindingDescription()
     {
@@ -44,9 +46,9 @@ struct Vertex
         return bindingDesc;
     }
 
-    static std::array<vk::VertexInputAttributeDescription, 2> GetAttributeDescriptions()
+    static std::array<vk::VertexInputAttributeDescription, 3> GetAttributeDescriptions()
     {
-        std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
+        std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions{};
         attributeDescriptions[ePOSITION].binding = 0;
         attributeDescriptions[ePOSITION].location = 0;
         attributeDescriptions[ePOSITION].format = vk::Format::eR32G32Sfloat;
@@ -57,6 +59,10 @@ struct Vertex
         attributeDescriptions[eCOLOR].format = vk::Format::eR32G32B32Sfloat;
         attributeDescriptions[eCOLOR].offset = offsetof(Vertex, color);
 
+        attributeDescriptions[eTEX_COORD].binding = 0;
+        attributeDescriptions[eTEX_COORD].location = 2;
+        attributeDescriptions[eTEX_COORD].format = vk::Format::eR32G32Sfloat;
+        attributeDescriptions[eTEX_COORD].offset = offsetof(Vertex, texCoord);
 
         return attributeDescriptions;
     }
@@ -104,7 +110,6 @@ private:
     vk::Pipeline _pipeline;
     vk::DescriptorPool _descriptorPool;
     vk::DescriptorSetLayout _descriptorSetLayout;
-    vk::DescriptorSet _descriptorSet;
     vk::CommandPool _commandPool;
     vk::CommandPool _transferCommandPool;
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
@@ -117,6 +122,8 @@ private:
     vk::DeviceMemory _indexBufferMemory;
     vk::Image _image;
     vk::DeviceMemory _imageMemory;
+    vk::ImageView _imageView;
+    vk::Sampler _sampler;
 
     std::unique_ptr<SwapChain> _swapChain;
 
@@ -138,10 +145,10 @@ private:
     PerformanceTracker _performanceTracker;
 
     const std::vector<Vertex> _vertices = {
-            { { -.5f, -.5f }, { 1.0f, 0.0f, 0.0f } },
-            { { 0.5f, -.5f }, { 0.0f, 1.0f, 0.0f } },
-            { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
-            { { -.5f, 0.5f }, { 1.0f, 1.0f, 1.0f } }
+            { { -.5f, -.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+            { { 0.5f, -.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+            { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+            { { -.5f, 0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
     };
     const std::vector<uint16_t> _indices = { 0, 1, 2, 2, 3, 0 };
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> _frameData;
@@ -191,6 +198,9 @@ private:
     void EndSingleTimeCommands(vk::CommandBuffer commandBuffer, vk::Queue& queue, vk::CommandPool& commandPool);
     void TransitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
     void CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
+    vk::ImageView CreateImageView(vk::Image image, vk::Format format);
+    void CreateTextureImageView();
+    void CreateTextureSampler();
 
     void LogInstanceExtensions();
     void CreateDescriptorPool();

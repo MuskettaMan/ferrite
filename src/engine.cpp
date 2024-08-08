@@ -51,6 +51,8 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     CreateCommandPool();
 
     CreateTextureImage();
+    CreateTextureImageView();
+    CreateTextureSampler();
 
     CreateVertexBuffer();
     CreateIndexBuffer();
@@ -80,7 +82,6 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     ImGui_ImplVulkan_Init(&initInfoVulkan);
 
     ImGui_ImplVulkan_CreateFontsTexture();
-
 }
 
 void Engine::Run()
@@ -221,8 +222,10 @@ void Engine::Shutdown()
     _device.destroy(_commandPool);
     _device.destroy(_transferCommandPool);
 
-    _device.destroy(_image, nullptr);
-    _device.freeMemory(_imageMemory, nullptr);
+    _device.destroy(_sampler);
+    _device.destroy(_imageView);
+    _device.destroy(_image);
+    _device.freeMemory(_imageMemory);
 
     _device.destroy(_vertexBuffer);
     _device.freeMemory(_vertexBufferMemory);
@@ -473,22 +476,6 @@ void Engine::CreateDevice()
     _device.getQueue(_queueFamilyIndices.tranferFamily.value(), 0, &_transferQueue);
 }
 
-void Engine::CreateDescriptorSetLayout()
-{
-    vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding{};
-    descriptorSetLayoutBinding.binding = 0;
-    descriptorSetLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
-    descriptorSetLayoutBinding.descriptorCount = 1;
-    descriptorSetLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
-    descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
-
-    vk::DescriptorSetLayoutCreateInfo createInfo{};
-    createInfo.bindingCount = 1;
-    createInfo.pBindings = &descriptorSetLayoutBinding;
-
-    util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_descriptorSetLayout), "Failed creating descriptor set layout!");
-}
-
 void Engine::CreateGraphicsPipeline()
 {
     auto vertByteCode = shader::ReadFile("shaders/triangle-v.spv");
@@ -545,7 +532,7 @@ void Engine::CreateGraphicsPipeline()
     rasterizationStateCreateInfo.rasterizerDiscardEnable = vk::False;
     rasterizationStateCreateInfo.polygonMode = vk::PolygonMode::eFill;
     rasterizationStateCreateInfo.lineWidth = 1.0f;
-    rasterizationStateCreateInfo.cullMode = vk::CullModeFlagBits::eBack;
+    rasterizationStateCreateInfo.cullMode = vk::CullModeFlagBits::eNone;
     rasterizationStateCreateInfo.frontFace = vk::FrontFace::eClockwise;
     rasterizationStateCreateInfo.depthBiasEnable = vk::False;
     rasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
@@ -862,9 +849,34 @@ uint32_t Engine::FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags pro
     throw std::runtime_error("Failed finding suitable memory type!");
 }
 
+void Engine::CreateDescriptorSetLayout()
+{
+    std::array<vk::DescriptorSetLayoutBinding, 2> bindings{};
+
+    vk::DescriptorSetLayoutBinding& descriptorSetLayoutBinding{ bindings[0] };
+    descriptorSetLayoutBinding.binding = 0;
+    descriptorSetLayoutBinding.descriptorCount = 1;
+    descriptorSetLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+    descriptorSetLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
+    descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+    vk::DescriptorSetLayoutBinding& samplerLayoutBinding{ bindings[1] };
+    samplerLayoutBinding.binding = 1;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+    samplerLayoutBinding.pImmutableSamplers = nullptr;
+
+
+    vk::DescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.bindingCount = bindings.size();
+    createInfo.pBindings = bindings.data();
+
+    util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_descriptorSetLayout), "Failed creating descriptor set layout!");
+}
+
 void Engine::CreateDescriptorPool()
 {
-
     std::vector<vk::DescriptorPoolSize> poolSizes = {
             { vk::DescriptorType::eSampler,              1000 },
             { vk::DescriptorType::eCombinedImageSampler, 1000 },
@@ -879,8 +891,10 @@ void Engine::CreateDescriptorPool()
             { vk::DescriptorType::eInputAttachment,      1000 }
     };
 
-    vk::DescriptorPoolCreateInfo createInfo{ vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1000,
-                                             static_cast<uint32_t>(poolSizes.size()), poolSizes.data() };
+    vk::DescriptorPoolCreateInfo createInfo{};
+    createInfo.poolSizeCount = poolSizes.size();
+    createInfo.pPoolSizes = poolSizes.data();
+    createInfo.maxSets = MAX_FRAMES_IN_FLIGHT + 1;
     util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }
 
@@ -906,21 +920,38 @@ void Engine::CreateDescriptorSets()
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(UBO);
 
-        vk::WriteDescriptorSet descriptorWrite{};
-        descriptorWrite.dstSet = _frameData[i].descriptorSet;
-        descriptorWrite.dstBinding = 0;
-        descriptorWrite.dstArrayElement = 0;
-        descriptorWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
-        descriptorWrite.descriptorCount = 1;
-        descriptorWrite.pBufferInfo = &bufferInfo;
+        vk::DescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        imageInfo.imageView = _imageView;
+        imageInfo.sampler = _sampler;
 
-        _device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+        std::array<vk::WriteDescriptorSet, 2> descriptorWrites{};
+
+        vk::WriteDescriptorSet& bufferWrite{ descriptorWrites[0] };
+        bufferWrite.dstSet = _frameData[i].descriptorSet;
+        bufferWrite.dstBinding = 0;
+        bufferWrite.dstArrayElement = 0;
+        bufferWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+        bufferWrite.descriptorCount = 1;
+        bufferWrite.pBufferInfo = &bufferInfo;
+
+        vk::WriteDescriptorSet& imageWrite{ descriptorWrites[1] };
+        imageWrite.dstSet = _frameData[i].descriptorSet;
+        imageWrite.dstBinding = 1;
+        imageWrite.dstArrayElement = 0;
+        imageWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+        imageWrite.descriptorCount = 1;
+        imageWrite.pImageInfo = &imageInfo;
+
+        _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
     }
 }
 
 void Engine::CreateTextureImage()
 {
     int32_t width, height, channels;
+
+    stbi_set_flip_vertically_on_load(true);
     stbi_uc* pixels = stbi_load("assets/textures/kitty.jpg", &width, &height, &channels, STBI_rgb_alpha);
     vk::DeviceSize imageSize = width * height * 4;
 
@@ -1049,6 +1080,7 @@ void Engine::TransitionImageLayout(vk::Image image, vk::Format format, vk::Image
         barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
         barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
+
         sourceStage = vk::PipelineStageFlagBits::eTransfer;
         destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
     }
@@ -1082,5 +1114,53 @@ void Engine::CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t widt
     commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, 1, &region);
 
     EndSingleTimeCommands(commandBuffer, _graphicsQueue, _commandPool);
+}
+
+void Engine::CreateTextureImageView()
+{
+    _imageView = CreateImageView(_image, vk::Format::eR8G8B8A8Srgb);
+}
+
+vk::ImageView Engine::CreateImageView(vk::Image image, vk::Format format)
+{
+    vk::ImageViewCreateInfo createInfo{};
+    createInfo.image = image;
+    createInfo.viewType = vk::ImageViewType::e2D;
+    createInfo.format = format;
+    createInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    createInfo.subresourceRange.baseMipLevel = 0;
+    createInfo.subresourceRange.levelCount = 1;
+    createInfo.subresourceRange.baseArrayLayer = 0;
+    createInfo.subresourceRange.layerCount = 1;
+
+    vk::ImageView view;
+    util::VK_ASSERT(_device.createImageView(&createInfo, nullptr, &view), "Failed creating image view!");
+
+    return view;
+}
+
+void Engine::CreateTextureSampler()
+{
+    vk::PhysicalDeviceProperties properties{};
+    _physicalDevice.getProperties(&properties);
+
+    vk::SamplerCreateInfo createInfo{};
+    createInfo.magFilter = vk::Filter::eLinear;
+    createInfo.minFilter = vk::Filter::eLinear;
+    createInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+    createInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+    createInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+    createInfo.anisotropyEnable = vk::True;
+    createInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    createInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+    createInfo.unnormalizedCoordinates = vk::False;
+    createInfo.compareEnable = vk::False;
+    createInfo.compareOp = vk::CompareOp::eAlways;
+    createInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+    createInfo.mipLodBias = 0.0f;
+    createInfo.minLod = 0.0f;
+    createInfo.maxLod = 0.0f;
+
+    util::VK_ASSERT(_device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
 }
 

@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 
 # Set the base directory to search for shader files
 base_dir = os.path.dirname(os.path.realpath(__file__))
