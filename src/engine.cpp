@@ -39,15 +39,15 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     PickPhysicalDevice();
     CreateDevice();
 
+    _dldi = vk::DispatchLoaderDynamic{ _instance, vkGetInstanceProcAddr, _device, vkGetDeviceProcAddr };
+
     _swapChain = std::make_unique<SwapChain>(_device, _physicalDevice, _surface);
 
     QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
     _swapChain->CreateSwapChain(glm::uvec2{ initInfo.width, initInfo.height }, familyIndices);
 
-    CreateRenderPass();
     CreateDescriptorSetLayout();
     CreateGraphicsPipeline();
-    _swapChain->CreateFrameBuffers(_renderPass);
     CreateCommandPool();
 
     CreateTextureImage();
@@ -66,9 +66,14 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     _newImGuiFrame = initInfo.newImGuiFrame;
     _shutdownImGui = initInfo.shutdownImGui;
 
+    vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
+    pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
+    vk::Format format = _swapChain->GetFormat();
+    pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
 
     ImGui_ImplVulkan_InitInfo initInfoVulkan{};
-    initInfoVulkan.RenderPass = _renderPass;
+    initInfoVulkan.UseDynamicRendering = true;
+    initInfoVulkan.PipelineRenderingCreateInfo = static_cast<VkPipelineRenderingCreateInfo>(pipelineRenderingCreateInfoKhr);
     initInfoVulkan.PhysicalDevice = _physicalDevice;
     initInfoVulkan.Device = _device;
     initInfoVulkan.ImageCount = MAX_FRAMES_IN_FLIGHT;
@@ -120,7 +125,7 @@ void Engine::Run()
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
     {
         QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
-        _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, familyIndices);
+        _swapChain->RecreateSwapChain(_application->DisplaySize(), familyIndices);
         return;
     } else
         util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
@@ -185,8 +190,9 @@ void Engine::Run()
 
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
     {
-        _swapChain->RecreateSwapChain(_application->DisplaySize(), _renderPass, _queueFamilyIndices);
-    } else
+        _swapChain->RecreateSwapChain(_application->DisplaySize(), _queueFamilyIndices);
+    }
+    else
     {
         util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
     }
@@ -235,7 +241,6 @@ void Engine::Shutdown()
 
     _device.destroy(_pipeline);
     _device.destroy(_pipelineLayout);
-    _device.destroy(_renderPass);
 
     for(size_t i = 0; i < _frameData.size(); ++i)
     {
@@ -312,6 +317,8 @@ std::vector<const char *> Engine::GetRequiredExtensions(const InitInfo &initInfo
     std::vector<const char *> extensions(initInfo.extensions, initInfo.extensions + initInfo.extensionCount);
     if(_enableValidationLayers)
         extensions.emplace_back(vk::EXTDebugUtilsExtensionName);
+
+    extensions.emplace_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 
     return extensions;
 }
@@ -452,7 +459,11 @@ void Engine::CreateDevice()
     for(uint32_t familyQueueIndex: uniqueQueueFamilies)
         queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags{}, familyQueueIndex, 1, &queuePriority);
 
+    vk::PhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeaturesKhr{};
+    dynamicRenderingFeaturesKhr.dynamicRendering = true;
+
     vk::DeviceCreateInfo createInfo{};
+    createInfo.pNext = &dynamicRenderingFeaturesKhr;
     createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
@@ -587,10 +598,17 @@ void Engine::CreateGraphicsPipeline()
     graphicsPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
     graphicsPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
     graphicsPipelineCreateInfo.layout = _pipelineLayout;
-    graphicsPipelineCreateInfo.renderPass = _renderPass;
     graphicsPipelineCreateInfo.subpass = 0;
     graphicsPipelineCreateInfo.basePipelineHandle = nullptr;
     graphicsPipelineCreateInfo.basePipelineIndex = -1;
+
+    vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
+    pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
+    vk::Format format = _swapChain->GetFormat();
+    pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
+
+    graphicsPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
+    graphicsPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
 
     auto result = _device.createGraphicsPipeline(nullptr, graphicsPipelineCreateInfo, nullptr);
     util::VK_ASSERT(result.result, "Failed creating the graphics pipeline layout!");
@@ -598,46 +616,6 @@ void Engine::CreateGraphicsPipeline()
 
     _device.destroy(vertModule);
     _device.destroy(fragModule);
-}
-
-void Engine::CreateRenderPass()
-{
-    vk::AttachmentDescription colorAttachment{};
-    colorAttachment.format = _swapChain->GetFormat();
-    colorAttachment.samples = vk::SampleCountFlagBits::e1;
-    colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
-    colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
-    colorAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
-    colorAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-    colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
-    colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
-
-    vk::AttachmentReference colorAttachmentReference{};
-    colorAttachmentReference.attachment = 0;
-    colorAttachmentReference.layout = vk::ImageLayout::eColorAttachmentOptimal;
-
-    vk::SubpassDescription subpassDescription{};
-    subpassDescription.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
-    subpassDescription.colorAttachmentCount = 1;
-    subpassDescription.pColorAttachments = &colorAttachmentReference;
-
-    vk::SubpassDependency dependency{};
-    dependency.srcSubpass = vk::SubpassExternal;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    dependency.srcAccessMask = vk::AccessFlagBits::eNone;
-    dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eColorAttachmentRead;
-
-    vk::RenderPassCreateInfo renderPassCreateInfo{};
-    renderPassCreateInfo.attachmentCount = 1;
-    renderPassCreateInfo.pAttachments = &colorAttachment;
-    renderPassCreateInfo.subpassCount = 1;
-    renderPassCreateInfo.pSubpasses = &subpassDescription;
-    renderPassCreateInfo.dependencyCount = 1;
-    renderPassCreateInfo.pDependencies = &dependency;
-
-    util::VK_ASSERT(_device.createRenderPass(&renderPassCreateInfo, nullptr, &_renderPass), "Failed creating the render pass!");
 }
 
 void Engine::CreateCommandPool()
@@ -671,16 +649,41 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     vk::CommandBufferBeginInfo commandBufferBeginInfo{};
     util::VK_ASSERT(commandBuffer.begin(&commandBufferBeginInfo), "Failed to begin recording command buffer!");
 
-    vk::RenderPassBeginInfo renderPassBeginInfo{};
-    renderPassBeginInfo.renderPass = _renderPass;
-    renderPassBeginInfo.framebuffer = _swapChain->GetFrameBuffer(swapChainImageIndex);
-    renderPassBeginInfo.renderArea = vk::Rect2D{ vk::Offset2D{ 0, 0 }, _swapChain->GetExtent() };
+    vk::ImageMemoryBarrier swapchainBarrierToOptimal{};
+    swapchainBarrierToOptimal.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+    swapchainBarrierToOptimal.oldLayout = vk::ImageLayout::eUndefined;
+    swapchainBarrierToOptimal.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    swapchainBarrierToOptimal.image = _swapChain->GetImage(swapChainImageIndex);
+    swapchainBarrierToOptimal.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    swapchainBarrierToOptimal.subresourceRange.levelCount = 1;
+    swapchainBarrierToOptimal.subresourceRange.baseMipLevel = 0;
+    swapchainBarrierToOptimal.subresourceRange.layerCount = 1;
+    swapchainBarrierToOptimal.subresourceRange.baseArrayLayer = 0;
 
-    vk::ClearValue clearColor{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 1.0f }}};
-    renderPassBeginInfo.clearValueCount = 1;
-    renderPassBeginInfo.pClearValues = &clearColor;
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eColorAttachmentOutput,
+                                  vk::DependencyFlags{ 0 },
+                                  0, nullptr,
+                                  0, nullptr,
+                                  1, &swapchainBarrierToOptimal);
 
-    commandBuffer.beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
+    vk::RenderingAttachmentInfoKHR colorAttachmentInfo{};
+    colorAttachmentInfo.imageView = _swapChain->GetImageView(swapChainImageIndex);
+    colorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
+    colorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
+    colorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
+    colorAttachmentInfo.clearValue = vk::ClearValue{ 0.0f };
+    colorAttachmentInfo.resolveMode = vk::ResolveModeFlagBits::eNone;
+
+    vk::RenderingInfoKHR renderingInfo{};
+    glm::uvec2 displaySize = _application->DisplaySize();
+    renderingInfo.renderArea.extent = vk::Extent2D{ displaySize.x, displaySize.y };
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.pColorAttachments = &colorAttachmentInfo;
+    renderingInfo.layerCount = 1;
+    renderingInfo.pDepthAttachment = nullptr;
+    renderingInfo.pStencilAttachment = nullptr;
+
+    commandBuffer.beginRenderingKHR(&renderingInfo, _dldi);
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pipeline);
 
@@ -698,7 +701,24 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
 
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
 
-    commandBuffer.endRenderPass();
+    commandBuffer.endRenderingKHR(_dldi);
+
+    vk::ImageMemoryBarrier swapchainBarrierToPresent{};
+    swapchainBarrierToPresent.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+    swapchainBarrierToPresent.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    swapchainBarrierToPresent.newLayout = vk::ImageLayout::ePresentSrcKHR;
+    swapchainBarrierToPresent.image = _swapChain->GetImage(swapChainImageIndex);
+    swapchainBarrierToPresent.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    swapchainBarrierToPresent.subresourceRange.levelCount = 1;
+    swapchainBarrierToPresent.subresourceRange.baseMipLevel = 0;
+    swapchainBarrierToPresent.subresourceRange.layerCount = 1;
+    swapchainBarrierToPresent.subresourceRange.baseArrayLayer = 0;
+
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eBottomOfPipe,
+                                  vk::DependencyFlags{ 0 },
+                                  0, nullptr,
+                                  0, nullptr,
+                                  1, &swapchainBarrierToPresent);
 
     commandBuffer.end();
 }
@@ -895,6 +915,7 @@ void Engine::CreateDescriptorPool()
     createInfo.poolSizeCount = poolSizes.size();
     createInfo.pPoolSizes = poolSizes.data();
     createInfo.maxSets = MAX_FRAMES_IN_FLIGHT + 1;
+    createInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
     util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }
 

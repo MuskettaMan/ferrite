@@ -106,7 +106,6 @@ private:
     vk::Queue _transferQueue;
     vk::SurfaceKHR _surface;
     vk::PipelineLayout _pipelineLayout;
-    vk::RenderPass _renderPass;
     vk::Pipeline _pipeline;
     vk::DescriptorPool _descriptorPool;
     vk::DescriptorSetLayout _descriptorSetLayout;
@@ -115,6 +114,7 @@ private:
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
     vk::Viewport _viewport;
     vk::Rect2D _scissor;
+    vk::DispatchLoaderDynamic _dldi;
 
     vk::Buffer _vertexBuffer;
     vk::DeviceMemory _vertexBufferMemory;
@@ -166,8 +166,15 @@ private:
     const std::vector<const char*> _deviceExtensions =
     {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+#if defined(LINUX)
+        VK_KHR_MULTIVIEW_EXTENSION_NAME,
+        VK_KHR_MAINTENANCE2_EXTENSION_NAME,
+#endif
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+        VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+        VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
+        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
     };
-
 
     void CreateInstance(const InitInfo& initInfo);
     bool CheckValidationLayerSupport();
@@ -180,7 +187,6 @@ private:
     void CreateDevice();
     void CreateDescriptorSetLayout();
     void CreateGraphicsPipeline();
-    void CreateRenderPass();
     void CreateCommandPool();
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);

@@ -68,16 +68,15 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
     CreateSwapChainImageViews();
 }
 
-void SwapChain::RecreateSwapChain(const glm::uvec2& screenSize, vk::RenderPass renderPass, const QueueFamilyIndices& familyIndices)
+void SwapChain::RecreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices)
 {
     _device.waitIdle();
 
     CleanUpSwapChain();
 
     CreateSwapChain(screenSize, familyIndices);
-    CreateFrameBuffers(renderPass);
+    //CreateFrameBuffers(renderPass);
 }
-
 
 void SwapChain::CreateSwapChainImageViews()
 {
@@ -152,30 +151,8 @@ vk::Extent2D SwapChain::ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capab
     return extent;
 }
 
-void SwapChain::CreateFrameBuffers(vk::RenderPass renderPass)
-{
-    _frameBuffers.resize(_imageViews.size());
-
-    for(size_t i = 0; i < _imageViews.size(); ++i)
-    {
-        vk::ImageView attachments[] = { _imageViews[i] };
-        vk::FramebufferCreateInfo framebufferCreateInfo{};
-        framebufferCreateInfo.renderPass = renderPass;
-        framebufferCreateInfo.attachmentCount = 1;
-        framebufferCreateInfo.pAttachments = attachments;
-        framebufferCreateInfo.width = _extent.width;
-        framebufferCreateInfo.height = _extent.height;
-        framebufferCreateInfo.layers = 1;
-
-        util::VK_ASSERT(_device.createFramebuffer(&framebufferCreateInfo, nullptr, &_frameBuffers[i]), "Failed creating frame buffer!");
-    }
-
-}
-
 void SwapChain::CleanUpSwapChain()
 {
-    for(auto frameBuffer : _frameBuffers)
-        _device.destroy(frameBuffer);
     for(auto imageView : _imageViews)
         _device.destroy(imageView);
 

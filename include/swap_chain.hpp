@@ -22,8 +22,7 @@ public:
     NON_COPYABLE(SwapChain);
 
     void CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices);
-    void RecreateSwapChain(const glm::uvec2& screenSize, vk::RenderPass renderPass, const QueueFamilyIndices& familyIndices);
-    void CreateFrameBuffers(vk::RenderPass renderPass);
+    void RecreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices);
 
     [[nodiscard]]
     static SupportDetails QuerySupport(vk::PhysicalDevice device, vk::SurfaceKHR surface);
@@ -33,9 +32,6 @@ public:
 
     [[nodiscard]]
     vk::SwapchainKHR GetSwapChain() const { return _swapChain; }
-
-    [[nodiscard]]
-    vk::Framebuffer GetFrameBuffer(uint32_t index) const { return _frameBuffers[index]; }
 
     [[nodiscard]]
     vk::ImageView GetImageView(uint32_t index) const { return _imageViews[index]; }
@@ -57,7 +53,6 @@ private:
     vk::SwapchainKHR _swapChain;
     std::vector<vk::Image> _images;
     std::vector<vk::ImageView> _imageViews;
-    std::vector<vk::Framebuffer> _frameBuffers;
     vk::Format _format;
     vk::Extent2D _extent;
 
