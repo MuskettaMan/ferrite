@@ -170,7 +170,11 @@ void Engine::Run()
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
+    stopwatch.start();
     util::VK_ASSERT(_graphicsQueue.submit(1, &submitInfo, _inFlightFences[_currentFrame]), "Failed submitting to graphics queue!");
+    stopwatch.stop();
+    frameData.emplace_back("Submit to graphics queue", stopwatch.elapsed_milliseconds());
+
 
     vk::PresentInfoKHR presentInfo{};
     presentInfo.waitSemaphoreCount = 1;
@@ -197,7 +201,10 @@ void Engine::Run()
         util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
     }
 
+    stopwatch.start();
     _device.waitIdle();
+    stopwatch.stop();
+    frameData.emplace_back("Wait idle", stopwatch.elapsed_milliseconds());
 
     _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 
@@ -226,7 +233,6 @@ void Engine::Shutdown()
     _device.destroy(_descriptorPool);
 
     _device.destroy(_commandPool);
-    _device.destroy(_transferCommandPool);
 
     _device.destroy(_sampler);
     _device.destroy(_imageView);
@@ -423,9 +429,6 @@ QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const &device)
         if(queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
             indices.graphicsFamily = i;
 
-        if(queueFamilies[i].queueFlags & vk::QueueFlagBits::eTransfer && !(queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics))
-            indices.tranferFamily = i;
-
         if(!indices.presentFamily.has_value())
         {
             vk::Bool32 supported;
@@ -439,9 +442,6 @@ QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const &device)
             break;
     }
 
-    if(!indices.tranferFamily.has_value())
-        indices.tranferFamily = indices.graphicsFamily;
-
     return indices;
 }
 
@@ -452,8 +452,7 @@ void Engine::CreateDevice()
     _physicalDevice.getFeatures(&deviceFeatures);
 
     std::vector <vk::DeviceQueueCreateInfo> queueCreateInfos{};
-    std::set <uint32_t> uniqueQueueFamilies = { _queueFamilyIndices.graphicsFamily.value(), _queueFamilyIndices.presentFamily.value(),
-                                                _queueFamilyIndices.tranferFamily.value() };
+    std::set <uint32_t> uniqueQueueFamilies = { _queueFamilyIndices.graphicsFamily.value(), _queueFamilyIndices.presentFamily.value() };
     float queuePriority{ 1.0f };
 
     for(uint32_t familyQueueIndex: uniqueQueueFamilies)
@@ -484,7 +483,6 @@ void Engine::CreateDevice()
 
     _device.getQueue(_queueFamilyIndices.graphicsFamily.value(), 0, &_graphicsQueue);
     _device.getQueue(_queueFamilyIndices.presentFamily.value(), 0, &_presentQueue);
-    _device.getQueue(_queueFamilyIndices.tranferFamily.value(), 0, &_transferQueue);
 }
 
 void Engine::CreateGraphicsPipeline()
@@ -625,12 +623,6 @@ void Engine::CreateCommandPool()
     commandPoolCreateInfo.queueFamilyIndex = _queueFamilyIndices.graphicsFamily.value();
 
     util::VK_ASSERT(_device.createCommandPool(&commandPoolCreateInfo, nullptr, &_commandPool), "Failed creating command pool!");
-
-    vk::CommandPoolCreateInfo transferCommandPoolCreateInfo{};
-    transferCommandPoolCreateInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
-    transferCommandPoolCreateInfo.queueFamilyIndex = _queueFamilyIndices.tranferFamily.value();
-
-    util::VK_ASSERT(_device.createCommandPool(&transferCommandPoolCreateInfo, nullptr, &_transferCommandPool), "Failed creating transfer command pool!");
 }
 
 void Engine::CreateCommandBuffers()
@@ -745,9 +737,8 @@ void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::M
     bufferInfo.size = size;
     bufferInfo.usage = usage;
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-    bufferInfo.queueFamilyIndexCount = 2;
-    std::array<uint32_t, 2> concurrentFamilies = { _queueFamilyIndices.graphicsFamily.value(), _queueFamilyIndices.tranferFamily.value() };
-    bufferInfo.pQueueFamilyIndices = concurrentFamilies.data();
+    bufferInfo.queueFamilyIndexCount = 1;
+    bufferInfo.pQueueFamilyIndices = &_queueFamilyIndices.graphicsFamily.value();
 
     util::VK_ASSERT(_device.createBuffer(&bufferInfo, nullptr, &buffer), "Failed creating vertex buffer!");
 
@@ -816,7 +807,7 @@ void Engine::CreateIndexBuffer()
 
 void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size)
 {
-    vk::CommandBuffer commandBuffer = BeginSingleTimeCommands(_transferCommandPool);
+    vk::CommandBuffer commandBuffer = BeginSingleTimeCommands(_commandPool);
 
     vk::BufferCopy copyRegion{};
     copyRegion.srcOffset = 0;
@@ -824,7 +815,7 @@ void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSi
     copyRegion.size = size;
     commandBuffer.copyBuffer(srcBuffer, dstBuffer, 1, &copyRegion);
 
-    EndSingleTimeCommands(commandBuffer, _transferQueue, _transferCommandPool);
+    EndSingleTimeCommands(commandBuffer, _graphicsQueue, _commandPool);
 }
 
 void Engine::CreateUniformBuffers()

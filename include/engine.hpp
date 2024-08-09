@@ -16,11 +16,10 @@ struct QueueFamilyIndices
 {
     std::optional<uint32_t> graphicsFamily;
     std::optional<uint32_t> presentFamily;
-    std::optional<uint32_t> tranferFamily;
 
     bool IsComplete()
     {
-        return graphicsFamily.has_value() && presentFamily.has_value() && tranferFamily.has_value();
+        return graphicsFamily.has_value() && presentFamily.has_value();
     }
 };
 
@@ -103,14 +102,12 @@ private:
     vk::Device _device;
     vk::Queue _graphicsQueue;
     vk::Queue _presentQueue;
-    vk::Queue _transferQueue;
     vk::SurfaceKHR _surface;
     vk::PipelineLayout _pipelineLayout;
     vk::Pipeline _pipeline;
     vk::DescriptorPool _descriptorPool;
     vk::DescriptorSetLayout _descriptorSetLayout;
     vk::CommandPool _commandPool;
-    vk::CommandPool _transferCommandPool;
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
     vk::Viewport _viewport;
     vk::Rect2D _scissor;
