@@ -2,10 +2,11 @@ cmake_minimum_required(VERSION 3.25.1)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 set(NAME pi_vulkan)
+set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++ -static-libgcc -static")
 
 project(pi_vulkan)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 
 #include_directories(external/vulkan)
 include_directories(external)
@@ -64,7 +65,7 @@ else()
 endif()
 
 # Link Vulkan to executable
-link_libraries(${Vulkan_LIBRARIES})
+link_libraries(${Vulkan_LIBRARY})
 
 # Add and link glfw on Windows
 if(WIN32)
@@ -120,7 +121,7 @@ endif()
 
 set(FREETYPE_DIR external/freetype/freetype2)
 
-add_subdirectory(external/freetype/freetype2)
+add_subdirectory(${FREETYPE_DIR})
 
 target_link_libraries(pi_vulkan PUBLIC ${FREETYPE_LIBRARY})
 target_include_directories(pi_vulkan SYSTEM PUBLIC ${FREETYPE_DIR}/include)
@@ -153,6 +154,10 @@ target_include_directories(pi_vulkan PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 
 
 include_directories("external/stb")
+
+add_subdirectory(external/spdlog)
+target_link_libraries(pi_vulkan PRIVATE spdlog::spdlog)
+
 
 # BUILD TYPE SETTINGS
 

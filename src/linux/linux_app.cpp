@@ -9,6 +9,7 @@
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <iostream>
+#include <spdlog/spdlog.h>
 
 #include "vulkan_helper.hpp"
 #include "imgui/backends/linux/imgui_impl_xlib.h"
@@ -142,15 +143,9 @@ void LinuxApp::Run(std::function<void()> updateLoop)
                     {
                         int64_t* state = reinterpret_cast<int64_t*>(propertyData);
                         if(state[0] == IconicState)
-                        {
-                            std::cout << "Window minimized" << std::endl;
-                            // Maximized!
-                        }
+                            spdlog::info("Window minimized");
                         else if(state[0] == NormalState)
-                        {
-                            std::cout << "Window restored" << std::endl;
-                            // Window restored!
-                        }
+                            spdlog::info("Window restored");
                         XFree(propertyData);
                     }
                 }
@@ -168,15 +163,9 @@ void LinuxApp::Run(std::function<void()> updateLoop)
                     {
                         Atom* state = reinterpret_cast<Atom*>(propertyData);
                         if(*state == _wmStateHidden)
-                        {
-                            std::cout << "Window hidden (possibly minimized)" << std::endl;
-                            // Window hidden.
-                        }
+                            spdlog::info("Window hidden (possibly minimized)");
                         else
-                        {
-                            std::cout << "Window visible" << std::endl;
-                            // Window visible.
-                        }
+                            spdlog::info("Window visible");
                         XFree(propertyData);
                     }
                 }

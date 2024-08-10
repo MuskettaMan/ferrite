@@ -7,6 +7,7 @@
 
 PerformanceTracker::PerformanceTracker()
 {
+    _totalTime = 0;
     _fpsValues.reserve(MAX_SAMPLES);
     _frameDurations.reserve(MAX_SAMPLES);
     for(size_t i = 0; i < _stageDurations.size(); ++i)
@@ -83,6 +84,9 @@ void PerformanceTracker::Update(const std::vector<FrameData>& frameData)
 
 void PerformanceTracker::Render()
 {
+    if(_timePoints.empty())
+        return;
+
     ImGui::Begin("Performance metrics");
 
     if(ImPlot::BeginPlot("FPS"))

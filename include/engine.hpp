@@ -31,7 +31,7 @@ struct Vertex
         eTEX_COORD
     };
 
-    glm::vec2 position;
+    glm::vec3 position;
     glm::vec3 color;
     glm::vec2 texCoord;
 
@@ -50,7 +50,7 @@ struct Vertex
         std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions{};
         attributeDescriptions[ePOSITION].binding = 0;
         attributeDescriptions[ePOSITION].location = 0;
-        attributeDescriptions[ePOSITION].format = vk::Format::eR32G32Sfloat;
+        attributeDescriptions[ePOSITION].format = vk::Format::eR32G32B32Sfloat;
         attributeDescriptions[ePOSITION].offset = offsetof(Vertex, position);
 
         attributeDescriptions[eCOLOR].binding = 0;
@@ -142,12 +142,20 @@ private:
     PerformanceTracker _performanceTracker;
 
     const std::vector<Vertex> _vertices = {
-            { { -.5f, -.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-            { { 0.5f, -.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-            { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-            { { -.5f, 0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
+            { { -.5f, -.5f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+            { { 0.5f, -.5f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+            { { 0.5f, 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+            { { -.5f, 0.5f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } },
+
+            { { -.5f, -.5f, -.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+            { { 0.5f, -.5f, -.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+            { { 0.5f, 0.5f, -.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+            { { -.5f, 0.5f, -.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } },
     };
-    const std::vector<uint16_t> _indices = { 0, 1, 2, 2, 3, 0 };
+    const std::vector<uint16_t> _indices = {
+            0, 1, 2, 2, 3, 0,
+            4, 5, 6, 6, 7, 4,
+    };
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> _frameData;
 
     const std::vector<const char*> _validationLayers =
@@ -194,18 +202,11 @@ private:
     void CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
     void CreateUniformBuffers();
     void UpdateUniformData(uint32_t currentFrame);
-    uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
     void CreateTextureImage();
-    void CreateImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Image& image, vk::DeviceMemory& memory);
-    vk::CommandBuffer BeginSingleTimeCommands(vk::CommandPool& commandPool);
-    void EndSingleTimeCommands(vk::CommandBuffer commandBuffer, vk::Queue& queue, vk::CommandPool& commandPool);
-    void TransitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
     void CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
-    vk::ImageView CreateImageView(vk::Image image, vk::Format format);
     void CreateTextureImageView();
     void CreateTextureSampler();
 
-    void LogInstanceExtensions();
     void CreateDescriptorPool();
     void CreateDescriptorSets();
 };

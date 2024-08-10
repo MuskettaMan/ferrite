@@ -16,7 +16,7 @@ public:
         std::vector<vk::PresentModeKHR> presentModes;
     };
 
-    SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::SurfaceKHR surface);
+    SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::Instance instance, vk::CommandPool commandPool, vk::Queue graphicsQueue, vk::SurfaceKHR surface, vk::Format depthFormat);
     ~SwapChain();
     NON_MOVABLE(SwapChain);
     NON_COPYABLE(SwapChain);
@@ -45,20 +45,43 @@ public:
     [[nodiscard]]
     vk::Image GetImage(uint32_t index) const { return _images[index]; }
 
+    [[nodiscard]]
+    vk::Format GetDepthFormat() const { return _depthFormat; }
+
+    [[nodiscard]]
+    vk::Image GetDepthImage() const { return _depthImage; }
+
+    [[nodiscard]]
+    vk::ImageView GetDepthView() const { return _depthImageView; }
+
+    [[nodiscard]]
+    glm::uvec2 GetImageSize() const { return _imageSize; }
+
 private:
+    vk::Instance _instance;
     vk::Device _device;
     vk::PhysicalDevice _physicalDevice;
+    vk::CommandPool _commandPool;
+    vk::Queue _graphicsQueue;
     vk::SurfaceKHR _surface;
+    glm::uvec2 _imageSize;
 
     vk::SwapchainKHR _swapChain;
+    vk::Extent2D _extent;
+
     std::vector<vk::Image> _images;
     std::vector<vk::ImageView> _imageViews;
     vk::Format _format;
-    vk::Extent2D _extent;
+
+    vk::Image _depthImage;
+    vk::DeviceMemory _depthImageMemory;
+    vk::ImageView _depthImageView;
+    vk::Format _depthFormat;
 
     void CleanUpSwapChain();
     vk::SurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
     vk::PresentModeKHR ChoosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
     vk::Extent2D ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities, const glm::uvec2& screenSize);
     void CreateSwapChainImageViews();
+    void CreateDepthResources(const glm::uvec2& screenSize);
 };

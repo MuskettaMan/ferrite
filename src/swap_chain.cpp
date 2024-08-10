@@ -1,11 +1,16 @@
 #include "swap_chain.hpp"
 #include "vulkan_helper.hpp"
+#include "vulkan/vulkan.h"
 #include "engine.hpp"
 
-SwapChain::SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::SurfaceKHR surface) :
+SwapChain::SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::Instance instance, vk::CommandPool commandPool, vk::Queue graphicsQueue, vk::SurfaceKHR surface, vk::Format depthFormat) :
     _device(device),
     _physicalDevice(physicalDevice),
-    _surface(surface)
+    _instance(instance),
+    _commandPool(commandPool),
+    _graphicsQueue(graphicsQueue),
+    _surface(surface),
+    _depthFormat(depthFormat)
 {
 }
 
@@ -16,6 +21,7 @@ SwapChain::~SwapChain()
 
 void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices)
 {
+    _imageSize = screenSize;
     SupportDetails swapChainSupport = QuerySupport(_physicalDevice, _surface);
 
     auto surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
@@ -61,11 +67,15 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
 
     util::VK_ASSERT(_device.createSwapchainKHR(&createInfo, nullptr, &_swapChain), "Failed creating swap chain!");
 
+    vk::DispatchLoaderDynamic dldi = vk::DispatchLoaderDynamic{ _instance, vkGetInstanceProcAddr, _device, vkGetDeviceProcAddr };
+    util::NameObject(_swapChain, "Main Swapchain", _device, dldi);
+
     _images = _device.getSwapchainImagesKHR(_swapChain);
     _format = surfaceFormat.format;
     _extent = extent;
 
     CreateSwapChainImageViews();
+    CreateDepthResources(screenSize);
 }
 
 void SwapChain::RecreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices)
@@ -75,7 +85,6 @@ void SwapChain::RecreateSwapChain(const glm::uvec2& screenSize, const QueueFamil
     CleanUpSwapChain();
 
     CreateSwapChain(screenSize, familyIndices);
-    //CreateFrameBuffers(renderPass);
 }
 
 void SwapChain::CreateSwapChainImageViews()
@@ -98,6 +107,10 @@ void SwapChain::CreateSwapChainImageViews()
                 }
         };
         util::VK_ASSERT(_device.createImageView(&createInfo, nullptr, &_imageViews[i]), "Failed creating image view for swap chain!");
+
+        vk::DispatchLoaderDynamic dldi = vk::DispatchLoaderDynamic{ _instance, vkGetInstanceProcAddr, _device, vkGetDeviceProcAddr };
+        util::NameObject(_imageViews[i], std::format("Swapchain Image View #{}", i), _device, dldi);
+        util::NameObject(_images[i], std::format("Swapchain Image #{}", i), _device, dldi);
     }
 }
 
@@ -157,5 +170,25 @@ void SwapChain::CleanUpSwapChain()
         _device.destroy(imageView);
 
     _device.destroy(_swapChain);
+
+    _device.destroy(_depthImage);
+    _device.destroy(_depthImageView);
+    _device.freeMemory(_depthImageMemory);
+}
+
+void SwapChain::CreateDepthResources(const glm::uvec2& screenSize)
+{
+    util::CreateImage(_device, _physicalDevice,
+                      screenSize.x, screenSize.y,
+                      _depthFormat, vk::ImageTiling::eOptimal,
+                      vk::ImageUsageFlagBits::eDepthStencilAttachment,
+                      vk::MemoryPropertyFlagBits::eDeviceLocal,
+                      _depthImage, _depthImageMemory);
+
+    _depthImageView = util::CreateImageView(_device, _depthImage, _depthFormat, vk::ImageAspectFlagBits::eDepth);
+
+    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
+    util::TransitionImageLayout(commandBuffer, _depthImage, _depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+    util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
 }
 

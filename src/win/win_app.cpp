@@ -8,7 +8,7 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, !_isFullscreen);
+    glfwWindowHint(GLFW_RESIZABLE, true);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
 
     const auto monitor = glfwGetPrimaryMonitor();
@@ -25,8 +25,10 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
 
     _window = glfwCreateWindow(mode->width, mode->height, _windowTitle.data(), nullptr, nullptr);
 
-    _width = mode->width;
-    _height = mode->height;
+    int32_t width, height;
+    glfwGetWindowSize(_window, &width, &height);
+    _width = width;
+    _height = height;
 
     ImGui_ImplGlfw_InitForVulkan(_window, true);
 }

@@ -1,20 +1,7 @@
 #include "vulkan_validation.hpp"
 #include <string>
 #include <iostream>
-
-vk::Result util::CreateDebugUtilsMessengerEXT(vk::Instance instance, const vk::DebugUtilsMessengerCreateInfoEXT* pCreateInfo,
-                                              const vk::AllocationCallbacks* pAllocator, vk::DebugUtilsMessengerEXT* pDebugMessenger)
-{
-    vk::DispatchLoaderDynamic dldi{ instance, vkGetInstanceProcAddr };
-    return instance.createDebugUtilsMessengerEXT(pCreateInfo, pAllocator, pDebugMessenger, dldi);
-}
-
-void util::DestroyDebugUtilsMessengerEXT(vk::Instance instance, vk::DebugUtilsMessengerEXT debugMessenger,
-                                           const vk::AllocationCallbacks* pAllocator)
-{
-    vk::DispatchLoaderDynamic dldi{ instance, vkGetInstanceProcAddr };
-    return instance.destroyDebugUtilsMessengerEXT(debugMessenger, pAllocator, dldi);
-}
+#include "spdlog/spdlog.h"
 
 void util::PopulateDebugMessengerCreateInfo(vk::DebugUtilsMessengerCreateInfoEXT& createInfo)
 {
@@ -52,24 +39,29 @@ VKAPI_ATTR VkBool32 VKAPI_CALL util::DebugCallback(
     }
 
     static std::string severity{};
+    spdlog::level::level_enum logLevel{};
     switch(messageSeverity)
     {
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
         severity = "[VERBOSE]";
+        logLevel = spdlog::level::level_enum::trace;
         break;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
         severity = "[INFO]";
+        logLevel = spdlog::level::level_enum::info;
         break;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
         severity = "[WARNING]";
+        logLevel = spdlog::level::level_enum::warn;
         break;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
         severity = "[ERROR]";
+        logLevel = spdlog::level::level_enum::err;
         break;
     }
 
     if(messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-        std::cerr << severity.c_str() << " " << type.c_str() << " Validation layer: " << pCallbackData->pMessage << std::endl;
+        spdlog::log(logLevel, "{0} Validation layer: {1}", type, pCallbackData->pMessage);
 
     return VK_FALSE;
 }

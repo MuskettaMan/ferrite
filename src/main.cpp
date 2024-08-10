@@ -8,6 +8,7 @@
 #include <iostream>
 #include "engine.hpp"
 #include "imgui.h"
+#include <spdlog/spdlog.h>
 
 std::shared_ptr<Application> g_app;
 std::shared_ptr<Engine> g_engine;
@@ -32,7 +33,7 @@ int main()
     }
     catch (const std::exception& e)
     {
-        std::cerr << e.what() << std::endl;
+        spdlog::error(e.what());
         return EXIT_FAILURE;
     }
 
