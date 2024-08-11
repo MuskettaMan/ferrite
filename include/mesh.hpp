@@ -99,6 +99,7 @@ struct MeshHandle
 
 struct TextureHandle
 {
+    std::string name;
     vk::Image image;
     vk::DeviceMemory imageMemory;
     vk::ImageView imageView;

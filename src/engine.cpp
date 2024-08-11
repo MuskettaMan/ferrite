@@ -60,7 +60,10 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
 
 
     CreateDescriptorSetLayout();
-    CreateGraphicsPipeline();
+    InitializeDeferredRTs();
+
+    CreateGeometryPipeline();
+    CreateLightingPipeline();
 
     CreateTextureSampler();
 
@@ -69,6 +72,7 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     CreateCommandBuffers();
     CreateSyncObjects();
     CreateDescriptorPool();
+
 
     ModelLoader modelLoader;
     Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
@@ -79,9 +83,9 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     _newImGuiFrame = initInfo.newImGuiFrame;
     _shutdownImGui = initInfo.shutdownImGui;
 
+    vk::Format format = _swapChain->GetFormat();
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
-    vk::Format format = _swapChain->GetFormat();
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
     pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
 
@@ -268,16 +272,26 @@ void Engine::Shutdown()
 
     _device.destroy(_sampler);
 
-    _device.destroy(_pipeline);
-    _device.destroy(_pipelineLayout);
+    _device.destroy(_geometryPipeline);
+    _device.destroy(_geometryPipelineLayout);
+    _device.destroy(_lightingPipeline);
+    _device.destroy(_lightingPipelineLayout);
 
     for(size_t i = 0; i < _frameData.size(); ++i)
     {
         _device.destroy(_frameData[i].uniformBuffer);
         _device.freeMemory(_frameData[i].uniformBufferMemory);
+
+        for(size_t j = 0; j < _frameData[i].deferredAttachments.size(); ++j)
+        {
+            _device.destroy(_frameData[i].deferredAttachments[j].image);
+            _device.destroy(_frameData[i].deferredAttachments[j].imageView);
+            _device.free(_frameData[i].deferredAttachments[j].imageMemory);
+        }
     }
 
-    _device.destroy(_descriptorSetLayout);
+    _device.destroy(_geometryDescriptorSetLayout);
+    _device.destroy(_lightingDescriptorSetLayout);
 
     _instance.destroy(_surface);
     _device.destroy();
@@ -505,10 +519,19 @@ void Engine::CreateDevice()
     _device.getQueue(_queueFamilyIndices.presentFamily.value(), 0, &_presentQueue);
 }
 
-void Engine::CreateGraphicsPipeline()
+void Engine::CreateGeometryPipeline()
 {
-    auto vertByteCode = shader::ReadFile("shaders/triangle-v.spv");
-    auto fragByteCode = shader::ReadFile("shaders/triangle-f.spv");
+    vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts = &_geometryDescriptorSetLayout;
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
+    pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
+
+    util::VK_ASSERT(_device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_geometryPipelineLayout),
+                    "Failed creating geometry pipeline layout!");
+
+    auto vertByteCode = shader::ReadFile("shaders/geom-v.spv");
+    auto fragByteCode = shader::ReadFile("shaders/geom-f.spv");
 
     vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _device);
     vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _device);
@@ -543,7 +566,7 @@ void Engine::CreateGraphicsPipeline()
                               1.0f };
     _scissor = vk::Rect2D{ vk::Offset2D{ 0, 0 }, swapChainExtent };
 
-    std::vector<vk::DynamicState> dynamicStates = {
+    std::array<vk::DynamicState, 2> dynamicStates = {
             vk::DynamicState::eViewport,
             vk::DynamicState::eScissor,
     };
@@ -576,24 +599,19 @@ void Engine::CreateGraphicsPipeline()
     multisampleStateCreateInfo.alphaToCoverageEnable = vk::False;
     multisampleStateCreateInfo.alphaToOneEnable = vk::False;
 
-    vk::PipelineColorBlendAttachmentState colorBlendAttachmentState{};
-    colorBlendAttachmentState.blendEnable = vk::False;
-    colorBlendAttachmentState.colorWriteMask =
-            vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
-            vk::ColorComponentFlagBits::eA;
-    colorBlendAttachmentState.srcColorBlendFactor = vk::BlendFactor::eOne;
-    colorBlendAttachmentState.dstColorBlendFactor = vk::BlendFactor::eZero;
-    colorBlendAttachmentState.colorBlendOp = vk::BlendOp::eAdd;
-    colorBlendAttachmentState.srcAlphaBlendFactor = vk::BlendFactor::eOne;
-    colorBlendAttachmentState.dstAlphaBlendFactor = vk::BlendFactor::eZero;
-    colorBlendAttachmentState.alphaBlendOp = vk::BlendOp::eAdd;
+    std::array<vk::PipelineColorBlendAttachmentState, 3> colorBlendAttachmentStates{};
+    for(auto& blendAttachmentState : colorBlendAttachmentStates)
+    {
+        blendAttachmentState.blendEnable = vk::False;
+        blendAttachmentState.colorWriteMask =
+                vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
+                vk::ColorComponentFlagBits::eA;
+    }
 
     vk::PipelineColorBlendStateCreateInfo colorBlendStateCreateInfo{};
     colorBlendStateCreateInfo.logicOpEnable = vk::False;
-    colorBlendStateCreateInfo.logicOp = vk::LogicOp::eCopy;
-    colorBlendStateCreateInfo.attachmentCount = 1;
-    colorBlendStateCreateInfo.pAttachments = &colorBlendAttachmentState;
-    colorBlendStateCreateInfo.blendConstants = std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f };
+    colorBlendStateCreateInfo.attachmentCount = colorBlendAttachmentStates.size();
+    colorBlendStateCreateInfo.pAttachments = colorBlendAttachmentStates.data();
 
     vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo{};
     depthStencilStateCreateInfo.depthTestEnable = true;
@@ -604,30 +622,147 @@ void Engine::CreateGraphicsPipeline()
     depthStencilStateCreateInfo.maxDepthBounds = 1.0f;
     depthStencilStateCreateInfo.stencilTestEnable = false;
 
+    vk::GraphicsPipelineCreateInfo geometryPipelineCreateInfo{};
+    geometryPipelineCreateInfo.stageCount = 2;
+    geometryPipelineCreateInfo.pStages = shaderStages;
+    geometryPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+    geometryPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
+    geometryPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
+    geometryPipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
+    geometryPipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
+    geometryPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
+    geometryPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
+    geometryPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
+    geometryPipelineCreateInfo.layout = _geometryPipelineLayout;
+    geometryPipelineCreateInfo.subpass = 0;
+    geometryPipelineCreateInfo.basePipelineHandle = nullptr;
+    geometryPipelineCreateInfo.basePipelineIndex = -1;
+
+    vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
+    std::array<vk::Format, 3> formats{ vk::Format::eR16G16B16A16Sfloat, vk::Format::eR16G16B16A16Sfloat, vk::Format::eR16G16B16A16Sfloat };
+    pipelineRenderingCreateInfoKhr.colorAttachmentCount = FrameData::DEFERRED_ATTACHMENT_COUNT;
+    pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = formats.data();
+    pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
+
+    geometryPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
+    geometryPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
+
+    auto result = _device.createGraphicsPipeline(nullptr, geometryPipelineCreateInfo, nullptr);
+    util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
+    _geometryPipeline = result.value;
+
+    _device.destroy(vertModule);
+    _device.destroy(fragModule);
+}
+
+void Engine::CreateLightingPipeline()
+{
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
     pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &_descriptorSetLayout;
+    pipelineLayoutCreateInfo.pSetLayouts = &_lightingDescriptorSetLayout;
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
     pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-    util::VK_ASSERT(_device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_pipelineLayout),
-                    "Failed creating a pipeline layout!");
+    util::VK_ASSERT(_device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_lightingPipelineLayout),
+                    "Failed creating geometry pipeline layout!");
 
-    vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo{};
-    graphicsPipelineCreateInfo.stageCount = 2;
-    graphicsPipelineCreateInfo.pStages = shaderStages;
-    graphicsPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
-    graphicsPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
-    graphicsPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
-    graphicsPipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
-    graphicsPipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
-    graphicsPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
-    graphicsPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
-    graphicsPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
-    graphicsPipelineCreateInfo.layout = _pipelineLayout;
-    graphicsPipelineCreateInfo.subpass = 0;
-    graphicsPipelineCreateInfo.basePipelineHandle = nullptr;
-    graphicsPipelineCreateInfo.basePipelineIndex = -1;
+    auto vertByteCode = shader::ReadFile("shaders/lighting-v.spv");
+    auto fragByteCode = shader::ReadFile("shaders/lighting-f.spv");
+
+    vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _device);
+    vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _device);
+
+    vk::PipelineShaderStageCreateInfo vertShaderStageCreateInfo{};
+    vertShaderStageCreateInfo.stage = vk::ShaderStageFlagBits::eVertex;
+    vertShaderStageCreateInfo.module = vertModule;
+    vertShaderStageCreateInfo.pName = "main";
+
+    vk::PipelineShaderStageCreateInfo fragShaderStageCreateInfo{};
+    fragShaderStageCreateInfo.stage = vk::ShaderStageFlagBits::eFragment;
+    fragShaderStageCreateInfo.module = fragModule;
+    fragShaderStageCreateInfo.pName = "main";
+
+    vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageCreateInfo, fragShaderStageCreateInfo };
+
+    vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo{};
+
+    vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo{};
+    inputAssemblyStateCreateInfo.topology = vk::PrimitiveTopology::eTriangleList;
+    inputAssemblyStateCreateInfo.primitiveRestartEnable = vk::False;
+
+    vk::Extent2D swapChainExtent{ _swapChain->GetExtent() };
+    _viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f,
+                              1.0f };
+    _scissor = vk::Rect2D{ vk::Offset2D{ 0, 0 }, swapChainExtent };
+
+    std::array<vk::DynamicState, 2> dynamicStates = {
+            vk::DynamicState::eViewport,
+            vk::DynamicState::eScissor,
+    };
+
+    vk::PipelineDynamicStateCreateInfo dynamicStateCreateInfo{};
+    dynamicStateCreateInfo.dynamicStateCount = dynamicStates.size();
+    dynamicStateCreateInfo.pDynamicStates = dynamicStates.data();
+
+    vk::PipelineViewportStateCreateInfo viewportStateCreateInfo{};
+    viewportStateCreateInfo.viewportCount = 1;
+    viewportStateCreateInfo.scissorCount = 1;
+
+    vk::PipelineRasterizationStateCreateInfo rasterizationStateCreateInfo{};
+    rasterizationStateCreateInfo.depthClampEnable = vk::False;
+    rasterizationStateCreateInfo.rasterizerDiscardEnable = vk::False;
+    rasterizationStateCreateInfo.polygonMode = vk::PolygonMode::eFill;
+    rasterizationStateCreateInfo.lineWidth = 1.0f;
+    rasterizationStateCreateInfo.cullMode = vk::CullModeFlagBits::eBack;
+    rasterizationStateCreateInfo.frontFace = vk::FrontFace::eClockwise;
+    rasterizationStateCreateInfo.depthBiasEnable = vk::False;
+    rasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
+    rasterizationStateCreateInfo.depthBiasClamp = 0.0f;
+    rasterizationStateCreateInfo.depthBiasSlopeFactor = 0.0f;
+
+    vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo{};
+    multisampleStateCreateInfo.sampleShadingEnable = vk::False;
+    multisampleStateCreateInfo.rasterizationSamples = vk::SampleCountFlagBits::e1;
+    multisampleStateCreateInfo.minSampleShading = 1.0f;
+    multisampleStateCreateInfo.pSampleMask = nullptr;
+    multisampleStateCreateInfo.alphaToCoverageEnable = vk::False;
+    multisampleStateCreateInfo.alphaToOneEnable = vk::False;
+
+    vk::PipelineColorBlendAttachmentState colorBlendAttachmentState{};
+    colorBlendAttachmentState.blendEnable = vk::False;
+    colorBlendAttachmentState.colorWriteMask =
+            vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
+            vk::ColorComponentFlagBits::eA;
+
+    vk::PipelineColorBlendStateCreateInfo colorBlendStateCreateInfo{};
+    colorBlendStateCreateInfo.logicOpEnable = vk::False;
+    colorBlendStateCreateInfo.attachmentCount = 1;
+    colorBlendStateCreateInfo.pAttachments = &colorBlendAttachmentState;
+
+    vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo{};
+    depthStencilStateCreateInfo.depthTestEnable = true;
+    depthStencilStateCreateInfo.depthWriteEnable = true;
+    depthStencilStateCreateInfo.depthCompareOp = vk::CompareOp::eLess;
+    depthStencilStateCreateInfo.depthBoundsTestEnable = false;
+    depthStencilStateCreateInfo.minDepthBounds = 0.0f;
+    depthStencilStateCreateInfo.maxDepthBounds = 1.0f;
+    depthStencilStateCreateInfo.stencilTestEnable = false;
+
+    vk::GraphicsPipelineCreateInfo lightingPipelineCreateInfo{};
+    lightingPipelineCreateInfo.stageCount = 2;
+    lightingPipelineCreateInfo.pStages = shaderStages;
+    lightingPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+    lightingPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
+    lightingPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
+    lightingPipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
+    lightingPipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
+    lightingPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
+    lightingPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
+    lightingPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
+    lightingPipelineCreateInfo.layout = _lightingPipelineLayout;
+    lightingPipelineCreateInfo.subpass = 0;
+    lightingPipelineCreateInfo.basePipelineHandle = nullptr;
+    lightingPipelineCreateInfo.basePipelineIndex = -1;
 
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
@@ -635,12 +770,12 @@ void Engine::CreateGraphicsPipeline()
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
     pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
 
-    graphicsPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
-    graphicsPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
+    lightingPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
+    lightingPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
 
-    auto result = _device.createGraphicsPipeline(nullptr, graphicsPipelineCreateInfo, nullptr);
-    util::VK_ASSERT(result.result, "Failed creating the graphics pipeline layout!");
-    _pipeline = result.value;
+    auto result = _device.createGraphicsPipeline(nullptr, lightingPipelineCreateInfo, nullptr);
+    util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
+    _lightingPipeline = result.value;
 
     _device.destroy(vertModule);
     _device.destroy(fragModule);
@@ -673,12 +808,30 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
 
-    vk::RenderingAttachmentInfoKHR colorAttachmentInfo{};
-    colorAttachmentInfo.imageView = _swapChain->GetImageView(swapChainImageIndex);
-    colorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
-    colorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
-    colorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear; // NOTE: Check if this can be set to DONTCARE
-    colorAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
+    for(auto& attachment : _frameData[_currentFrame].deferredAttachments)
+        util::TransitionImageLayout(commandBuffer, attachment.image, vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+
+    std::array<vk::RenderingAttachmentInfoKHR, 3> colorAttachmentInfos{};
+    vk::RenderingAttachmentInfoKHR& albedoAttachmentInfo{ colorAttachmentInfos[0] };
+    albedoAttachmentInfo.imageView = _frameData[_currentFrame].deferredAttachments[0].imageView;
+    albedoAttachmentInfo.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    albedoAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
+    albedoAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
+    albedoAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
+
+    vk::RenderingAttachmentInfoKHR& normalAttachmentInfo{ colorAttachmentInfos[1] };
+    normalAttachmentInfo.imageView = _frameData[_currentFrame].deferredAttachments[1].imageView;
+    normalAttachmentInfo.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    normalAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
+    normalAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
+    normalAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
+
+    vk::RenderingAttachmentInfoKHR& positionAttachmentInfo{ colorAttachmentInfos[2] };
+    positionAttachmentInfo.imageView = _frameData[_currentFrame].deferredAttachments[2].imageView;
+    positionAttachmentInfo.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    positionAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
+    positionAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
+    positionAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
 
     vk::RenderingAttachmentInfoKHR depthAttachmentInfo{};
     depthAttachmentInfo.imageView = _swapChain->GetDepthView();
@@ -696,17 +849,17 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     glm::uvec2 displaySize = _swapChain->GetImageSize();
     renderingInfo.renderArea.extent = vk::Extent2D{ displaySize.x, displaySize.y };
     renderingInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachments = &colorAttachmentInfo;
+    renderingInfo.colorAttachmentCount = colorAttachmentInfos.size();
+    renderingInfo.pColorAttachments = colorAttachmentInfos.data();
     renderingInfo.layerCount = 1;
     renderingInfo.pDepthAttachment = &depthAttachmentInfo;
     renderingInfo.pStencilAttachment = util::HasStencilComponent(_swapChain->GetDepthFormat()) ? &stencilAttachmentInfo : nullptr;
 
-    util::BeginLabel(commandBuffer, "Draw quad", glm::vec3{ 1.0f, 0.0f, 0.0f }, _dldi);
+    util::BeginLabel(commandBuffer, "Geometry pass", glm::vec3{ 1.0f, 0.0f, 0.0f }, _dldi);
 
     commandBuffer.beginRenderingKHR(&renderingInfo, _dldi);
 
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pipeline);
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _geometryPipeline);
 
     commandBuffer.setViewport(0, 1, &_viewport);
     commandBuffer.setScissor(0, 1, &_scissor);
@@ -719,23 +872,56 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
                 throw std::runtime_error("No support for topology other than triangle list!");
 
             if(!_model.textures.empty())
-                UpdateDescriptorSet(_currentFrame, _model.textures[0].imageView);
+                UpdateGeometryDescriptorSet(_currentFrame, _model.textures[0].imageView);
 
             vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
             vk::DeviceSize offsets[] = { 0 };
             commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
             commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
 
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[_currentFrame].descriptorSet, 0, nullptr);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 0, 1, &_frameData[_currentFrame].geometryDescriptorSet, 0, nullptr);
 
             commandBuffer.drawIndexed(primitive.triangleCount, 1, 0, 0, 0);
         }
     }
 
+    commandBuffer.endRenderingKHR(_dldi);
+
+    util::EndLabel(commandBuffer, _dldi);
+
+
+    for(auto& attachment : _frameData[_currentFrame].deferredAttachments)
+        util::TransitionImageLayout(commandBuffer, attachment.image, vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+
+    vk::RenderingAttachmentInfoKHR finalColorAttachmentInfo{};
+    finalColorAttachmentInfo.imageView = _swapChain->GetImageView(swapChainImageIndex);
+    finalColorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
+    finalColorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
+    finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
+    finalColorAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
+
+    renderingInfo = vk::RenderingInfoKHR{};
+    renderingInfo.renderArea.extent = vk::Extent2D{ displaySize.x, displaySize.y };
+    renderingInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.pColorAttachments = &finalColorAttachmentInfo;
+    renderingInfo.layerCount = 1;
+    renderingInfo.pDepthAttachment = nullptr;
+    renderingInfo.pStencilAttachment = nullptr;
+
+    util::BeginLabel(commandBuffer, "Lighting pass", glm::vec3{ 1.0f, 0.0f, 0.0f }, _dldi);
+    commandBuffer.beginRenderingKHR(&renderingInfo, _dldi);
+
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _lightingPipeline);
+
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _lightingPipelineLayout, 0, 1, &_frameData[_currentFrame].lightingDescriptorSet, 0, nullptr);
+
+    // Fullscreen quad.
+    commandBuffer.draw(3, 1, 0, 0);
+
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
 
     commandBuffer.endRenderingKHR(_dldi);
-
     util::EndLabel(commandBuffer, _dldi);
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
@@ -852,34 +1038,78 @@ void Engine::UpdateUniformData(uint32_t currentFrame)
 
 void Engine::CreateDescriptorSetLayout()
 {
-    std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
+    // Geometry
+    {
+        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
 
-    vk::DescriptorSetLayoutBinding& descriptorSetLayoutBinding{ bindings[0] };
-    descriptorSetLayoutBinding.binding = 0;
-    descriptorSetLayoutBinding.descriptorCount = 1;
-    descriptorSetLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
-    descriptorSetLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
-    descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+        vk::DescriptorSetLayoutBinding& descriptorSetLayoutBinding{bindings[0]};
+        descriptorSetLayoutBinding.binding = 0;
+        descriptorSetLayoutBinding.descriptorCount = 1;
+        descriptorSetLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+        descriptorSetLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
+        descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-    vk::DescriptorSetLayoutBinding& samplerLayoutBinding{ bindings[1] };
-    samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = vk::DescriptorType::eSampler;
-    samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
+        vk::DescriptorSetLayoutBinding& samplerLayoutBinding{bindings[1]};
+        samplerLayoutBinding.binding = 1;
+        samplerLayoutBinding.descriptorCount = 1;
+        samplerLayoutBinding.descriptorType = vk::DescriptorType::eSampler;
+        samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+        samplerLayoutBinding.pImmutableSamplers = nullptr;
 
-    vk::DescriptorSetLayoutBinding& imageLayoutBinding{ bindings[2] };
-    imageLayoutBinding.binding = 2;
-    imageLayoutBinding.descriptorCount = 1;
-    imageLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
-    imageLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-    imageLayoutBinding.pImmutableSamplers = nullptr;
+        vk::DescriptorSetLayoutBinding& imageLayoutBinding{bindings[2]};
+        imageLayoutBinding.binding = 2;
+        imageLayoutBinding.descriptorCount = 1;
+        imageLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
+        imageLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+        imageLayoutBinding.pImmutableSamplers = nullptr;
 
-    vk::DescriptorSetLayoutCreateInfo createInfo{};
-    createInfo.bindingCount = bindings.size();
-    createInfo.pBindings = bindings.data();
+        vk::DescriptorSetLayoutCreateInfo createInfo{};
+        createInfo.bindingCount = bindings.size();
+        createInfo.pBindings = bindings.data();
 
-    util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_descriptorSetLayout), "Failed creating descriptor set layout!");
+        util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_geometryDescriptorSetLayout),
+                        "Failed creating geometry descriptor set layout!");
+    }
+
+    // Lighting
+    {
+        std::array<vk::DescriptorSetLayoutBinding, 4> bindings{};
+
+        vk::DescriptorSetLayoutBinding& samplerLayoutBinding{bindings[0]};
+        samplerLayoutBinding.binding = 0;
+        samplerLayoutBinding.descriptorCount = 1;
+        samplerLayoutBinding.descriptorType = vk::DescriptorType::eSampler;
+        samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+        samplerLayoutBinding.pImmutableSamplers = nullptr;
+
+        vk::DescriptorSetLayoutBinding& albedoLayoutBinding{bindings[1]};
+        albedoLayoutBinding.binding = 1;
+        albedoLayoutBinding.descriptorCount = 1;
+        albedoLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
+        albedoLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+        albedoLayoutBinding.pImmutableSamplers = nullptr;
+
+        vk::DescriptorSetLayoutBinding& normalLayoutBinding{bindings[2]};
+        normalLayoutBinding.binding = 2;
+        normalLayoutBinding.descriptorCount = 1;
+        normalLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
+        normalLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+        normalLayoutBinding.pImmutableSamplers = nullptr;
+
+        vk::DescriptorSetLayoutBinding& positionLayoutBinding{bindings[3]};
+        positionLayoutBinding.binding = 3;
+        positionLayoutBinding.descriptorCount = 1;
+        positionLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
+        positionLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+        positionLayoutBinding.pImmutableSamplers = nullptr;
+
+        vk::DescriptorSetLayoutCreateInfo createInfo{};
+        createInfo.bindingCount = bindings.size();
+        createInfo.pBindings = bindings.data();
+
+        util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_lightingDescriptorSetLayout),
+                        "Failed creating lighting descriptor set layout!");
+    }
 }
 
 void Engine::CreateDescriptorPool()
@@ -901,30 +1131,51 @@ void Engine::CreateDescriptorPool()
     vk::DescriptorPoolCreateInfo createInfo{};
     createInfo.poolSizeCount = poolSizes.size();
     createInfo.pPoolSizes = poolSizes.data();
-    createInfo.maxSets = MAX_FRAMES_IN_FLIGHT + 1;
+    createInfo.maxSets = MAX_FRAMES_IN_FLIGHT * 2 + 1;
     createInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
     util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }
 
 void Engine::CreateDescriptorSets()
 {
-    std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
-    std::for_each(layouts.begin(), layouts.end(), [this](auto& l){ l = _descriptorSetLayout; });
-    vk::DescriptorSetAllocateInfo allocateInfo{};
-    allocateInfo.descriptorPool = _descriptorPool;
-    allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    allocateInfo.pSetLayouts = layouts.data();
+    {
+        std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
+        std::for_each(layouts.begin(), layouts.end(), [this](auto& l)
+        { l = _geometryDescriptorSetLayout; });
+        vk::DescriptorSetAllocateInfo allocateInfo{};
+        allocateInfo.descriptorPool = _descriptorPool;
+        allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+        allocateInfo.pSetLayouts = layouts.data();
 
-    std::array<vk::DescriptorSet,  MAX_FRAMES_IN_FLIGHT> descriptorSets;
+        std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets;
 
-    util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()), "Failed allocating descriptor sets!");
-    for(size_t i = 0; i < descriptorSets.size(); ++i)
-        _frameData[i].descriptorSet = descriptorSets[i];
+        util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
+                        "Failed allocating descriptor sets!");
+        for (size_t i = 0; i < descriptorSets.size(); ++i)
+            _frameData[i].geometryDescriptorSet = descriptorSets[i];
+    }
+    {
+        std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
+        std::for_each(layouts.begin(), layouts.end(), [this](auto& l) { l = _lightingDescriptorSetLayout; });
+        vk::DescriptorSetAllocateInfo allocateInfo{};
+        allocateInfo.descriptorPool = _descriptorPool;
+        allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+        allocateInfo.pSetLayouts = layouts.data();
+
+        std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets;
+
+        util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
+                        "Failed allocating descriptor sets!");
+        for (size_t i = 0; i < descriptorSets.size(); ++i)
+            _frameData[i].lightingDescriptorSet = descriptorSets[i];
+    }
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
         if(!_model.textures.empty())
-            UpdateDescriptorSet(i, _model.textures[0].imageView);
+            UpdateGeometryDescriptorSet(i, _model.textures[0].imageView);
+
+        UpdateLightingDescriptorSet(i);
     }
 }
 
@@ -1009,7 +1260,7 @@ void Engine::CreateTextureSampler()
     util::VK_ASSERT(_device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
 }
 
-void Engine::UpdateDescriptorSet(uint32_t frameIndex, vk::ImageView texture)
+void Engine::UpdateGeometryDescriptorSet(uint32_t frameIndex, vk::ImageView texture)
 {
     vk::DescriptorBufferInfo bufferInfo{};
     bufferInfo.buffer = _frameData[frameIndex].uniformBuffer;
@@ -1026,7 +1277,7 @@ void Engine::UpdateDescriptorSet(uint32_t frameIndex, vk::ImageView texture)
     std::array<vk::WriteDescriptorSet, 3> descriptorWrites{};
 
     vk::WriteDescriptorSet& bufferWrite{ descriptorWrites[0] };
-    bufferWrite.dstSet = _frameData[frameIndex].descriptorSet;
+    bufferWrite.dstSet = _frameData[frameIndex].geometryDescriptorSet;
     bufferWrite.dstBinding = 0;
     bufferWrite.dstArrayElement = 0;
     bufferWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
@@ -1034,7 +1285,7 @@ void Engine::UpdateDescriptorSet(uint32_t frameIndex, vk::ImageView texture)
     bufferWrite.pBufferInfo = &bufferInfo;
 
     vk::WriteDescriptorSet& samplerWrite{ descriptorWrites[1] };
-    samplerWrite.dstSet = _frameData[frameIndex].descriptorSet;
+    samplerWrite.dstSet = _frameData[frameIndex].geometryDescriptorSet;
     samplerWrite.dstBinding = 1;
     samplerWrite.dstArrayElement = 0;
     samplerWrite.descriptorType = vk::DescriptorType::eSampler;
@@ -1042,7 +1293,7 @@ void Engine::UpdateDescriptorSet(uint32_t frameIndex, vk::ImageView texture)
     samplerWrite.pImageInfo = &samplerInfo;
 
     vk::WriteDescriptorSet& imageWrite{ descriptorWrites[2] };
-    imageWrite.dstSet = _frameData[frameIndex].descriptorSet;
+    imageWrite.dstSet = _frameData[frameIndex].geometryDescriptorSet;
     imageWrite.dstBinding = 2;
     imageWrite.dstArrayElement = 0;
     imageWrite.descriptorType = vk::DescriptorType::eSampledImage;
@@ -1051,6 +1302,53 @@ void Engine::UpdateDescriptorSet(uint32_t frameIndex, vk::ImageView texture)
 
     _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }
+
+void Engine::UpdateLightingDescriptorSet(uint32_t frameIndex)
+{
+    vk::DescriptorImageInfo samplerInfo{};
+    samplerInfo.sampler = _sampler;
+
+    std::array<vk::DescriptorImageInfo, 3> imageInfo{};
+    imageInfo[0].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    imageInfo[0].imageView = _frameData[frameIndex].deferredAttachments[0].imageView;
+    imageInfo[1].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    imageInfo[1].imageView = _frameData[frameIndex].deferredAttachments[1].imageView;
+    imageInfo[2].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    imageInfo[2].imageView = _frameData[frameIndex].deferredAttachments[2].imageView;
+
+    std::array<vk::WriteDescriptorSet, 4> descriptorWrites{};
+
+    descriptorWrites[0].dstSet = _frameData[frameIndex].lightingDescriptorSet;
+    descriptorWrites[0].dstBinding = 0;
+    descriptorWrites[0].dstArrayElement = 0;
+    descriptorWrites[0].descriptorType = vk::DescriptorType::eSampler;
+    descriptorWrites[0].descriptorCount = 1;
+    descriptorWrites[0].pImageInfo = &samplerInfo;
+
+    descriptorWrites[1].dstSet = _frameData[frameIndex].lightingDescriptorSet;
+    descriptorWrites[1].dstBinding = 1;
+    descriptorWrites[1].dstArrayElement = 0;
+    descriptorWrites[1].descriptorType = vk::DescriptorType::eSampledImage;
+    descriptorWrites[1].descriptorCount = 1;
+    descriptorWrites[1].pImageInfo = &imageInfo[0];
+
+    descriptorWrites[2].dstSet = _frameData[frameIndex].lightingDescriptorSet;
+    descriptorWrites[2].dstBinding = 2;
+    descriptorWrites[2].dstArrayElement = 0;
+    descriptorWrites[2].descriptorType = vk::DescriptorType::eSampledImage;
+    descriptorWrites[2].descriptorCount = 1;
+    descriptorWrites[2].pImageInfo = &imageInfo[1];
+
+    descriptorWrites[3].dstSet = _frameData[frameIndex].lightingDescriptorSet;
+    descriptorWrites[3].dstBinding = 3;
+    descriptorWrites[3].dstArrayElement = 0;
+    descriptorWrites[3].descriptorType = vk::DescriptorType::eSampledImage;
+    descriptorWrites[3].descriptorCount = 1;
+    descriptorWrites[3].pImageInfo = &imageInfo[2];
+
+    _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+}
+
 
 ModelHandle Engine::LoadModel(const Model& model)
 {
@@ -1091,4 +1389,37 @@ ModelHandle Engine::LoadModel(const Model& model)
     }
 
     return modelHandle;
+}
+
+void Engine::InitializeDeferredRTs()
+{
+    vk::Format format = vk::Format::eR16G16B16A16Sfloat;
+    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        _frameData[i].deferredAttachments[0].name = "Albedo GBuffer";
+        _frameData[i].deferredAttachments[1].name = "Normal GBuffer";
+        _frameData[i].deferredAttachments[2].name = "Position GBuffer";
+
+        for(auto& attachment : _frameData[i].deferredAttachments)
+        {
+            Texture texture;
+            texture.width = _swapChain->GetImageSize().x;
+            texture.height = _swapChain->GetImageSize().y;
+            texture.numChannels = 4;
+            util::CreateImage(_device, _physicalDevice,
+                              texture.width, texture.height,
+                              format,
+                              vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlagBits::eDeviceLocal,
+                              attachment.image, attachment.imageMemory);
+            attachment.imageView = util::CreateImageView(_device, attachment.image, format, vk::ImageAspectFlagBits::eColor);
+
+            util::NameObject(attachment.image, "[IMAGE] " + attachment.name, _device, _dldi);
+            util::NameObject(attachment.imageView, "[IMAGE VIEW] " + attachment.name, _device, _dldi);
+            util::NameObject(attachment.imageMemory, "[IMAGE MEMORY] " + attachment.name, _device, _dldi);
+
+            vk::CommandBuffer cb = util::BeginSingleTimeCommands(_device, _commandPool);
+            util::TransitionImageLayout(cb, attachment.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+            util::EndSingleTimeCommands(_device, _graphicsQueue, cb, _commandPool);
+        }
+    }
 }

@@ -33,10 +33,16 @@ struct UBO
 
 struct FrameData
 {
+    const static uint32_t DEFERRED_ATTACHMENT_COUNT = 3;
+
     vk::Buffer uniformBuffer;
     vk::DeviceMemory uniformBufferMemory;
     void* uniformBufferMapped;
-    vk::DescriptorSet descriptorSet;
+    vk::DescriptorSet geometryDescriptorSet;
+    vk::DescriptorSet lightingDescriptorSet;
+
+    std::array<TextureHandle, DEFERRED_ATTACHMENT_COUNT> deferredAttachments;
+
 };
 
 class Engine
@@ -60,15 +66,22 @@ private:
     vk::Queue _graphicsQueue;
     vk::Queue _presentQueue;
     vk::SurfaceKHR _surface;
-    vk::PipelineLayout _pipelineLayout;
-    vk::Pipeline _pipeline;
     vk::DescriptorPool _descriptorPool;
-    vk::DescriptorSetLayout _descriptorSetLayout;
+    vk::DescriptorSetLayout _geometryDescriptorSetLayout;
+    vk::DescriptorSetLayout _lightingDescriptorSetLayout;
     vk::CommandPool _commandPool;
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
     vk::Viewport _viewport;
     vk::Rect2D _scissor;
     vk::DispatchLoaderDynamic _dldi;
+
+    // Deferred rendering
+    vk::PipelineLayout _geometryPipelineLayout;
+    vk::Pipeline _geometryPipeline;
+
+    vk::PipelineLayout _lightingPipelineLayout;
+    vk::Pipeline _lightingPipeline;
+    // ---
 
     ModelHandle _model;
 
@@ -128,7 +141,8 @@ private:
     QueueFamilyIndices FindQueueFamilies(const vk::PhysicalDevice& device);
     void CreateDevice();
     void CreateDescriptorSetLayout();
-    void CreateGraphicsPipeline();
+    void CreateGeometryPipeline();
+    void CreateLightingPipeline();
     void CreateCommandPool();
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
@@ -144,6 +158,9 @@ private:
     void CreateTextureSampler();
     void CreateDescriptorPool();
     void CreateDescriptorSets();
-    void UpdateDescriptorSet(uint32_t frameIndex, vk::ImageView texture);
+    void UpdateGeometryDescriptorSet(uint32_t frameIndex, vk::ImageView texture);
+    void UpdateLightingDescriptorSet(uint32_t frameIndex);
     ModelHandle LoadModel(const Model& model);
+
+    void InitializeDeferredRTs();
 };
