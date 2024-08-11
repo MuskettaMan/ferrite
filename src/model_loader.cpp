@@ -59,6 +59,8 @@ MeshPrimitive ModelLoader::ProcessPrimitive(const fastgltf::Primitive& gltfPrimi
     primitive.topology = MapGltfTopology(gltfPrimitive.type);
 
     bool verticesReserved = false;
+    bool tangentFound = false;
+    bool texCoordFound = false;
 
     for(auto& attribute : gltfPrimitive.attributes)
     {
@@ -75,13 +77,16 @@ MeshPrimitive ModelLoader::ProcessPrimitive(const fastgltf::Primitive& gltfPrimi
         if(!verticesReserved)
         { primitive.vertices = std::vector<Vertex>(accessor.count); verticesReserved = true; }
 
-        // TODO: Add support for normals.
         std::uint32_t offset;
         if(attribute.name == "POSITION")
             offset = offsetof(Vertex, position);
+        else if(attribute.name == "NORMAL")
+            offset = offsetof(Vertex, normal);
+        else if(attribute.name == "TANGENT")
+        { offset = offsetof(Vertex, tangent); tangentFound = true; }
         else if(attribute.name == "TEXCOORD_0")
-            offset = offsetof(Vertex, texCoord);
-        else if(attribute.name == "COLOR0")
+        { offset = offsetof(Vertex, texCoord); texCoordFound = true; }
+        else if(attribute.name == "COLOR_0")
             offset = offsetof(Vertex, color);
         else
             continue;
@@ -128,6 +133,9 @@ MeshPrimitive ModelLoader::ProcessPrimitive(const fastgltf::Primitive& gltfPrimi
             }
         }
     }
+
+    if(!tangentFound && texCoordFound)
+        CalculateTangents(primitive);
 
     return primitive;
 }
@@ -222,5 +230,71 @@ vk::IndexType ModelLoader::MapIndexType(fastgltf::ComponentType componentType)
     case fastgltf::ComponentType::UnsignedShort: return vk::IndexType::eUint16;
     default: throw std::runtime_error("Unsupported index component type!");
     }
+}
+
+void ModelLoader::CalculateTangents(MeshPrimitive& primitive)
+{
+    uint32_t indexElementSize = (primitive.indexType == vk::IndexType::eUint16 ? 2 : 4);
+    uint32_t triangleCount = primitive.indices.size() > 0 ? primitive.indices.size() / indexElementSize / 3 : primitive.vertices.size() / 3;
+    for(size_t i = 0; i < triangleCount; ++i)
+    {
+        std::array<Vertex*, 3> triangle = {};
+        if(primitive.indices.size() > 0)
+        {
+            std::array<uint32_t, 3> indices = {};
+            std::memcpy(&indices[0], &primitive.indices[(i * 3 + 0) * indexElementSize], indexElementSize);
+            std::memcpy(&indices[1], &primitive.indices[(i * 3 + 1) * indexElementSize], indexElementSize);
+            std::memcpy(&indices[2], &primitive.indices[(i * 3 + 2) * indexElementSize], indexElementSize);
+
+            triangle = {
+                    &primitive.vertices[indices[0]],
+                    &primitive.vertices[indices[1]],
+                    &primitive.vertices[indices[2]]
+            };
+        }
+        else
+        {
+            triangle = {
+                    &primitive.vertices[i * 3 + 0],
+                    &primitive.vertices[i * 3 + 1],
+                    &primitive.vertices[i * 3 + 2]
+            };
+        }
+
+
+        glm::vec4 tangent = CalculateTangent(triangle[0]->position, triangle[1]->position, triangle[2]->position,
+                                             triangle[0]->texCoord, triangle[1]->texCoord, triangle[2]->texCoord,
+                                             triangle[0]->normal);
+
+        triangle[0]->tangent += tangent;
+        triangle[1]->tangent += tangent;
+        triangle[2]->tangent += tangent;
+    }
+
+    for(size_t i = 0; i < primitive.vertices.size(); ++i)
+        primitive.vertices[i].tangent = glm::normalize(primitive.vertices[i].tangent);
+}
+
+glm::vec4 ModelLoader::CalculateTangent(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec2 uv0, glm::vec2 uv1, glm::vec2 uv2, glm::vec3 normal)
+{
+    glm::vec3 e1 = p1 - p0;
+    glm::vec3 e2 = p2 - p0;
+
+    float deltaU1 = uv1.x - uv0.x;
+    float deltaV1 = uv1.y - uv0.y;
+    float deltaU2 = uv2.x - uv0.x;
+    float deltaV2 = uv2.y - uv0.y;
+
+    float f = 1.0f / (deltaU1 * deltaV2 - deltaU2 * deltaV1);
+
+    glm::vec3 tangent;
+    tangent = f * (deltaV2 * e1 - deltaV1 * e2);
+
+    tangent = glm::normalize(tangent);
+
+    glm::vec3 bitangent = glm::normalize(glm::cross(normal, tangent));
+    float w = (glm::dot(glm::cross(normal, tangent), bitangent) < 0.0f) ? -1.0f : 1.0f;
+
+    return glm::vec4(tangent.x, tangent.y, tangent.z, w);
 }
 

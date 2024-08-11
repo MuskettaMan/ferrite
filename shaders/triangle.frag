@@ -14,5 +14,6 @@ void main()
 
     color = texture(sampler2D(image, imageSampler), texCoord).rgb;
 
+
     outColor = vec4(pow(color, vec3(1.0 / 2.2)), 1.0);
 }

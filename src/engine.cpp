@@ -718,7 +718,8 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
             if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
                 throw std::runtime_error("No support for topology other than triangle list!");
 
-            UpdateDescriptorSet(_currentFrame, _model.textures[0].imageView);
+            if(!_model.textures.empty())
+                UpdateDescriptorSet(_currentFrame, _model.textures[0].imageView);
 
             vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
             vk::DeviceSize offsets[] = { 0 };
@@ -922,7 +923,8 @@ void Engine::CreateDescriptorSets()
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        UpdateDescriptorSet(i, _model.textures[0].imageView);
+        if(!_model.textures.empty())
+            UpdateDescriptorSet(i, _model.textures[0].imageView);
     }
 }
 

@@ -183,7 +183,7 @@ endif()
 
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     message("Debug build.")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
 elseif(CMAKE_BUILD_TYPE MATCHES Release)
     message("Release build.")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")

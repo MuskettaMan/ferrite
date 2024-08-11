@@ -8,16 +8,20 @@ struct Vertex
 {
     enum Enumeration {
         ePOSITION,
+        eNORMAL,
+        eTANGENT,
         eCOLOR,
         eTEX_COORD
     };
 
     glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec4 tangent;
     glm::vec3 color;
     glm::vec2 texCoord;
 
     static vk::VertexInputBindingDescription GetBindingDescription();
-    static std::array<vk::VertexInputAttributeDescription, 3> GetAttributeDescriptions();
+    static std::array<vk::VertexInputAttributeDescription, 5> GetAttributeDescriptions();
 };
 
 struct MeshPrimitive
