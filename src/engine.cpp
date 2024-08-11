@@ -7,12 +7,17 @@
 #include <set>
 #include <implot.h>
 #include <thread>
+
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
 
 #include "imgui.h"
 #include "engine.hpp"
@@ -46,6 +51,18 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     CreateDevice();
     CreateCommandPool();
 
+    VmaVulkanFunctions vulkanFunctions = {};
+    vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+
+    VmaAllocatorCreateInfo vmaAllocatorCreateInfo{};
+    vmaAllocatorCreateInfo.physicalDevice = _physicalDevice;
+    vmaAllocatorCreateInfo.device = _device;
+    vmaAllocatorCreateInfo.instance = _instance;
+    vmaAllocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    vmaAllocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
+    vmaCreateAllocator(&vmaAllocatorCreateInfo, &_vmaAllocator);
+
 
     auto supportedDepthFormat = util::FindSupportedFormat(_physicalDevice, { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
                                                vk::ImageTiling::eOptimal,
@@ -53,7 +70,7 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
 
     assert(supportedDepthFormat.has_value() && "No supported depth format!");
 
-    _swapChain = std::make_unique<SwapChain>(_device, _physicalDevice, _instance, _commandPool, _graphicsQueue, _surface, supportedDepthFormat.value());
+    _swapChain = std::make_unique<SwapChain>(_device, _physicalDevice, _instance, _commandPool, _vmaAllocator, _graphicsQueue, _surface, supportedDepthFormat.value());
 
     QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
     _swapChain->CreateSwapChain(glm::uvec2{ initInfo.width, initInfo.height }, familyIndices);
@@ -253,15 +270,15 @@ void Engine::Shutdown()
         {
             _device.destroy(primitive.vertexBuffer);
             _device.destroy(primitive.indexBuffer);
-            _device.free(primitive.vertexBufferMemory);
-            _device.free(primitive.indexBufferMemory);
+            vmaFreeMemory(_vmaAllocator, primitive.vertexBufferAllocation);
+            vmaFreeMemory(_vmaAllocator, primitive.indexBufferAllocation);
         }
     }
     for(auto& texture : _model.textures)
     {
         _device.destroy(texture.image);
         _device.destroy(texture.imageView);
-        _device.free(texture.imageMemory);
+        vmaFreeMemory(_vmaAllocator, texture.imageAllocation);
     }
 
     _swapChain.reset();
@@ -280,18 +297,21 @@ void Engine::Shutdown()
     for(size_t i = 0; i < _frameData.size(); ++i)
     {
         _device.destroy(_frameData[i].uniformBuffer);
-        _device.freeMemory(_frameData[i].uniformBufferMemory);
+        vmaUnmapMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation);
+        vmaFreeMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation);
 
         for(size_t j = 0; j < _frameData[i].deferredAttachments.size(); ++j)
         {
             _device.destroy(_frameData[i].deferredAttachments[j].image);
             _device.destroy(_frameData[i].deferredAttachments[j].imageView);
-            _device.free(_frameData[i].deferredAttachments[j].imageMemory);
+            vmaFreeMemory(_vmaAllocator, _frameData[i].deferredAttachments[j].imageAllocation);
         }
     }
 
     _device.destroy(_geometryDescriptorSetLayout);
     _device.destroy(_lightingDescriptorSetLayout);
+
+    vmaDestroyAllocator(_vmaAllocator);
 
     _instance.destroy(_surface);
     _device.destroy();
@@ -740,13 +760,8 @@ void Engine::CreateLightingPipeline()
     colorBlendStateCreateInfo.pAttachments = &colorBlendAttachmentState;
 
     vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo{};
-    depthStencilStateCreateInfo.depthTestEnable = true;
-    depthStencilStateCreateInfo.depthWriteEnable = true;
-    depthStencilStateCreateInfo.depthCompareOp = vk::CompareOp::eLess;
-    depthStencilStateCreateInfo.depthBoundsTestEnable = false;
-    depthStencilStateCreateInfo.minDepthBounds = 0.0f;
-    depthStencilStateCreateInfo.maxDepthBounds = 1.0f;
-    depthStencilStateCreateInfo.stencilTestEnable = false;
+    depthStencilStateCreateInfo.depthTestEnable = false;
+    depthStencilStateCreateInfo.depthWriteEnable = false;
 
     vk::GraphicsPipelineCreateInfo lightingPipelineCreateInfo{};
     lightingPipelineCreateInfo.stageCount = 2;
@@ -768,7 +783,6 @@ void Engine::CreateLightingPipeline()
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
     vk::Format format = _swapChain->GetFormat();
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
-    pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
 
     lightingPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
     lightingPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
@@ -944,8 +958,7 @@ void Engine::CreateSyncObjects()
     }
 }
 
-void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer &buffer,
-                          vk::DeviceMemory &bufferMemory) const
+void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation) const
 {
     vk::BufferCreateInfo bufferInfo{};
     bufferInfo.size = size;
@@ -954,43 +967,30 @@ void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::M
     bufferInfo.queueFamilyIndexCount = 1;
     bufferInfo.pQueueFamilyIndices = &_queueFamilyIndices.graphicsFamily.value();
 
-    util::VK_ASSERT(_device.createBuffer(&bufferInfo, nullptr, &buffer), "Failed creating vertex buffer!");
+    VmaAllocationCreateInfo allocationInfo{};
+    allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    if(mappable)
+        allocationInfo.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
-    vk::MemoryRequirements memoryRequirements;
-    _device.getBufferMemoryRequirements(buffer, &memoryRequirements);
-
-    vk::MemoryAllocateInfo allocateInfo{};
-    allocateInfo.allocationSize = memoryRequirements.size;
-    if(allocateInfo.allocationSize / 4096 != 0)
-        allocateInfo.allocationSize += allocateInfo.allocationSize - (allocateInfo.allocationSize % 4096);
-    allocateInfo.memoryTypeIndex = util::FindMemoryType(_physicalDevice, memoryRequirements.memoryTypeBits, properties);
-
-    util::VK_ASSERT(_device.allocateMemory(&allocateInfo, nullptr, &bufferMemory), "Failed allocating memory for the vertex buffer!");
-
-    _device.bindBufferMemory(buffer, bufferMemory, 0);
+    util::VK_ASSERT(vmaCreateBuffer(_vmaAllocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo), &allocationInfo, reinterpret_cast<VkBuffer*>(&buffer), &allocation, nullptr), "Failed creating buffer!");
 }
 
 template <typename T>
-void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, vk::DeviceMemory& memory, vk::BufferUsageFlags usage) const
+void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage) const
 {
     vk::DeviceSize bufferSize = vec.size() * sizeof(T);
 
     vk::Buffer stagingBuffer;
-    vk::DeviceMemory stagingBufferMemory;
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
-                 vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, stagingBuffer, stagingBufferMemory);
+    VmaAllocation stagingBufferAllocation;
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation);
 
-    void *data;
-    util::VK_ASSERT(_device.mapMemory(stagingBufferMemory, 0, bufferSize, vk::MemoryMapFlags{ 0 }, &data), "Failed mapping vertex buffer data to staging buffer!");
-    memcpy(data, vec.data(), static_cast<size_t>(bufferSize));
-    _device.unmapMemory(stagingBufferMemory);
+    vmaCopyMemoryToAllocation(_vmaAllocator, vec.data(), stagingBufferAllocation, 0, bufferSize);
 
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage,
-                 vk::MemoryPropertyFlagBits::eDeviceLocal, buffer, memory);
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation);
 
     CopyBuffer(stagingBuffer, buffer, bufferSize);
     _device.destroy(stagingBuffer, nullptr);
-    _device.freeMemory(stagingBufferMemory, nullptr);
+    vmaFreeMemory(_vmaAllocator, stagingBufferAllocation);
 }
 
 void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const
@@ -1014,9 +1014,9 @@ void Engine::CreateUniformBuffers()
     {
         CreateBuffer(bufferSize,
                      vk::BufferUsageFlagBits::eUniformBuffer,
-                     vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-                     _frameData[i].uniformBuffer, _frameData[i].uniformBufferMemory);
-        util::VK_ASSERT(_device.mapMemory(_frameData[i].uniformBufferMemory, vk::DeviceSize{ 0 }, bufferSize, vk::MemoryMapFlags{ 0 }, &_frameData[i].uniformBufferMapped), "Failed mapping memory for UBO!");
+                     _frameData[i].uniformBuffer, true, _frameData[i].uniformBufferAllocation);
+
+        util::VK_ASSERT(vmaMapMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation, &_frameData[i].uniformBufferMapped), "Failed mapping memory for UBO!");
     }
 }
 
@@ -1184,22 +1184,16 @@ void Engine::CreateTextureImage(const Texture& texture, TextureHandle& textureHa
     vk::DeviceSize imageSize = texture.width * texture.height * texture.numChannels;
 
     vk::Buffer stagingBuffer;
-    vk::DeviceMemory stagingBufferMemory;
+    VmaAllocation stagingBufferAllocation;
 
-    CreateBuffer(imageSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, stagingBuffer, stagingBufferMemory);
+    CreateBuffer(imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation);
 
-    void* data;
-    util::VK_ASSERT(_device.mapMemory(stagingBufferMemory, 0, imageSize, vk::MemoryMapFlags{0}, &data), "Failed mapping image memory!");
-    memcpy(data, texture.data.data(), static_cast<size_t>(imageSize));
-    _device.unmapMemory(stagingBufferMemory);
+    vmaCopyMemoryToAllocation(_vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
 
-    util::CreateImage(_device, _physicalDevice,
-                      texture.width, texture.height,
-                      format,
+    util::CreateImage(_device, _vmaAllocator, texture.width, texture.height, format,
                       vk::ImageTiling::eOptimal,
                       vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-                      vk::MemoryPropertyFlagBits::eDeviceLocal,
-                      textureHandle.image, textureHandle.imageMemory);
+                      textureHandle.image, textureHandle.imageAllocation);
 
     vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
     util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
@@ -1212,7 +1206,7 @@ void Engine::CreateTextureImage(const Texture& texture, TextureHandle& textureHa
     util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
 
     _device.destroy(stagingBuffer, nullptr);
-    _device.free(stagingBufferMemory, nullptr);
+    vmaFreeMemory(_vmaAllocator, stagingBufferAllocation);
 }
 
 void Engine::CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height)
@@ -1365,8 +1359,8 @@ ModelHandle Engine::LoadModel(const Model& model)
             primitiveHandle.indexType = primitive.indexType;
             primitiveHandle.triangleCount = primitive.indices.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
 
-            CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferMemory, vk::BufferUsageFlagBits::eVertexBuffer);
-            CreateLocalBuffer(primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferMemory, vk::BufferUsageFlagBits::eIndexBuffer);
+            CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer);
+            CreateLocalBuffer(primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer);
 
             meshHandle.primitives.emplace_back(primitiveHandle);
         }
@@ -1406,16 +1400,15 @@ void Engine::InitializeDeferredRTs()
             texture.width = _swapChain->GetImageSize().x;
             texture.height = _swapChain->GetImageSize().y;
             texture.numChannels = 4;
-            util::CreateImage(_device, _physicalDevice,
+            util::CreateImage(_device, _vmaAllocator,
                               texture.width, texture.height,
                               format,
-                              vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlagBits::eDeviceLocal,
-                              attachment.image, attachment.imageMemory);
+                              vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+                              attachment.image, attachment.imageAllocation);
             attachment.imageView = util::CreateImageView(_device, attachment.image, format, vk::ImageAspectFlagBits::eColor);
 
             util::NameObject(attachment.image, "[IMAGE] " + attachment.name, _device, _dldi);
             util::NameObject(attachment.imageView, "[IMAGE VIEW] " + attachment.name, _device, _dldi);
-            util::NameObject(attachment.imageMemory, "[IMAGE MEMORY] " + attachment.name, _device, _dldi);
 
             vk::CommandBuffer cb = util::BeginSingleTimeCommands(_device, _commandPool);
             util::TransitionImageLayout(cb, attachment.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);

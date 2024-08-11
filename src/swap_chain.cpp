@@ -3,11 +3,12 @@
 #include "vulkan/vulkan.h"
 #include "engine.hpp"
 
-SwapChain::SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::Instance instance, vk::CommandPool commandPool, vk::Queue graphicsQueue, vk::SurfaceKHR surface, vk::Format depthFormat) :
+SwapChain::SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::Instance instance, vk::CommandPool commandPool, VmaAllocator allocator, vk::Queue graphicsQueue, vk::SurfaceKHR surface, vk::Format depthFormat) :
     _device(device),
     _physicalDevice(physicalDevice),
     _instance(instance),
     _commandPool(commandPool),
+    _allocator(allocator),
     _graphicsQueue(graphicsQueue),
     _surface(surface),
     _depthFormat(depthFormat)
@@ -173,17 +174,16 @@ void SwapChain::CleanUpSwapChain()
 
     _device.destroy(_depthImage);
     _device.destroy(_depthImageView);
-    _device.freeMemory(_depthImageMemory);
+    vmaFreeMemory(_allocator, _depthImageAllocation);
 }
 
 void SwapChain::CreateDepthResources(const glm::uvec2& screenSize)
 {
-    util::CreateImage(_device, _physicalDevice,
+    util::CreateImage(_device, _allocator,
                       screenSize.x, screenSize.y,
                       _depthFormat, vk::ImageTiling::eOptimal,
                       vk::ImageUsageFlagBits::eDepthStencilAttachment,
-                      vk::MemoryPropertyFlagBits::eDeviceLocal,
-                      _depthImage, _depthImageMemory);
+                      _depthImage, _depthImageAllocation);
 
     _depthImageView = util::CreateImageView(_device, _depthImage, _depthFormat, vk::ImageAspectFlagBits::eDepth);
 

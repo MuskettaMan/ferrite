@@ -174,6 +174,8 @@ target_link_libraries(pi_vulkan PRIVATE spdlog::spdlog)
 add_subdirectory(external/fastgltf)
 target_link_libraries(pi_vulkan PRIVATE fastgltf::fastgltf)
 
+add_subdirectory(external/VulkanMemoryAllocator)
+target_link_libraries(pi_vulkan PRIVATE VulkanMemoryAllocator)
 
 # BUILD TYPE SETTINGS
 

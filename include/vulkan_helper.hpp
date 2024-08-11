@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <sstream>
 #include "spdlog/spdlog.h"
+#include "vk_mem_alloc.h"
 
 namespace util
 {
@@ -82,7 +83,7 @@ namespace util
         throw std::runtime_error("Failed finding suitable memory type!");
     }
 
-    static void CreateImage(vk::Device device, vk::PhysicalDevice physicalDevice, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Image& image, vk::DeviceMemory& memory)
+    static void CreateImage(vk::Device device, VmaAllocator allocator, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::Image& image, VmaAllocation& allocation)
     {
         vk::ImageCreateInfo createInfo{};
         createInfo.imageType = vk::ImageType::e2D;
@@ -99,18 +100,10 @@ namespace util
         createInfo.samples = vk::SampleCountFlagBits::e1;
         createInfo.flags = vk::ImageCreateFlags{ 0 };
 
-        util::VK_ASSERT(device.createImage(&createInfo, nullptr, &image), "Failed creating image!");
+        VmaAllocationCreateInfo allocationInfo{};
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-        vk::MemoryRequirements memoryRequirements;
-        device.getImageMemoryRequirements(image, &memoryRequirements);
-
-        vk::MemoryAllocateInfo allocateInfo{};
-        allocateInfo.allocationSize = memoryRequirements.size;
-        allocateInfo.memoryTypeIndex = FindMemoryType(physicalDevice, memoryRequirements.memoryTypeBits, properties);
-
-        util::VK_ASSERT(device.allocateMemory(&allocateInfo, nullptr, &memory), "Failed allocating memory!");
-
-        device.bindImageMemory(image, memory, 0);
+        util::VK_ASSERT(vmaCreateImage(allocator, reinterpret_cast<VkImageCreateInfo*>(&createInfo), &allocationInfo, reinterpret_cast<VkImage*>(&image), &allocation, nullptr), "Failed creating image!");
     }
 
     static vk::CommandBuffer BeginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool)

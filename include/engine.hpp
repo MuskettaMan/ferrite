@@ -36,7 +36,7 @@ struct FrameData
     const static uint32_t DEFERRED_ATTACHMENT_COUNT = 3;
 
     vk::Buffer uniformBuffer;
-    vk::DeviceMemory uniformBufferMemory;
+    VmaAllocation uniformBufferAllocation;
     void* uniformBufferMapped;
     vk::DescriptorSet geometryDescriptorSet;
     vk::DescriptorSet lightingDescriptorSet;
@@ -74,14 +74,13 @@ private:
     vk::Viewport _viewport;
     vk::Rect2D _scissor;
     vk::DispatchLoaderDynamic _dldi;
+    VmaAllocator _vmaAllocator;
 
-    // Deferred rendering
     vk::PipelineLayout _geometryPipelineLayout;
     vk::Pipeline _geometryPipeline;
 
     vk::PipelineLayout _lightingPipelineLayout;
     vk::Pipeline _lightingPipeline;
-    // ---
 
     ModelHandle _model;
 
@@ -147,9 +146,9 @@ private:
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
     void CreateSyncObjects();
-    void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& bufferMemory) const;
+    void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation) const;
     template <typename T>
-    void CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, vk::DeviceMemory& memory, vk::BufferUsageFlags usage) const;
+    void CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage) const;
     void CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const;
     void CreateUniformBuffers();
     void UpdateUniformData(uint32_t currentFrame);

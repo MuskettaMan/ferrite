@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.hpp>
 #include <glm/glm.hpp>
 #include "class_decorations.hpp"
+#include "vk_mem_alloc.h"
 
 struct QueueFamilyIndices;
 
@@ -16,7 +17,7 @@ public:
         std::vector<vk::PresentModeKHR> presentModes;
     };
 
-    SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::Instance instance, vk::CommandPool commandPool, vk::Queue graphicsQueue, vk::SurfaceKHR surface, vk::Format depthFormat);
+    SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::Instance instance, vk::CommandPool commandPool, VmaAllocator allocator, vk::Queue graphicsQueue, vk::SurfaceKHR surface, vk::Format depthFormat);
     ~SwapChain();
     NON_MOVABLE(SwapChain);
     NON_COPYABLE(SwapChain);
@@ -64,6 +65,7 @@ private:
     vk::CommandPool _commandPool;
     vk::Queue _graphicsQueue;
     vk::SurfaceKHR _surface;
+    VmaAllocator _allocator;
     glm::uvec2 _imageSize;
 
     vk::SwapchainKHR _swapChain;
@@ -74,7 +76,7 @@ private:
     vk::Format _format;
 
     vk::Image _depthImage;
-    vk::DeviceMemory _depthImageMemory;
+    VmaAllocation _depthImageAllocation;
     vk::ImageView _depthImageView;
     vk::Format _depthFormat;
 

@@ -3,6 +3,7 @@
 #include <array>
 #include <vulkan/vulkan.hpp>
 #include <glm/glm.hpp>
+#include "vk_mem_alloc.h"
 
 struct Vertex
 {
@@ -88,8 +89,8 @@ struct MeshPrimitiveHandle
 
     vk::Buffer vertexBuffer;
     vk::Buffer indexBuffer;
-    vk::DeviceMemory vertexBufferMemory;
-    vk::DeviceMemory indexBufferMemory;
+    VmaAllocation vertexBufferAllocation;
+    VmaAllocation indexBufferAllocation;
 };
 
 struct MeshHandle
@@ -101,7 +102,7 @@ struct TextureHandle
 {
     std::string name;
     vk::Image image;
-    vk::DeviceMemory imageMemory;
+    VmaAllocation imageAllocation;
     vk::ImageView imageView;
     uint32_t width, height, numChannels;
     vk::Format format;
