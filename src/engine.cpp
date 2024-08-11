@@ -62,8 +62,6 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     CreateDescriptorSetLayout();
     CreateGraphicsPipeline();
 
-    CreateTextureImage();
-    CreateTextureImageView();
     CreateTextureSampler();
 
     CreateUniformBuffers();
@@ -71,6 +69,11 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     CreateCommandBuffers();
     CreateSyncObjects();
     CreateDescriptorPool();
+
+    ModelLoader modelLoader;
+    Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
+    _model = LoadModel(model);
+
     CreateDescriptorSets();
 
     _newImGuiFrame = initInfo.newImGuiFrame;
@@ -98,10 +101,6 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     ImGui_ImplVulkan_Init(&initInfoVulkan);
 
     ImGui_ImplVulkan_CreateFontsTexture();
-
-    ModelLoader modelLoader;
-    Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
-    _model = LoadModel(model);
 }
 
 void Engine::Run()
@@ -244,7 +243,7 @@ void Engine::Shutdown()
         _instance.destroyDebugUtilsMessengerEXT(_debugMessenger, nullptr, _dldi);
 
 
-    for(auto& mesh : _model)
+    for(auto& mesh : _model.meshes)
     {
         for(auto& primitive : mesh.primitives)
         {
@@ -254,6 +253,12 @@ void Engine::Shutdown()
             _device.free(primitive.indexBufferMemory);
         }
     }
+    for(auto& texture : _model.textures)
+    {
+        _device.destroy(texture.image);
+        _device.destroy(texture.imageView);
+        _device.free(texture.imageMemory);
+    }
 
     _swapChain.reset();
 
@@ -262,9 +267,6 @@ void Engine::Shutdown()
     _device.destroy(_commandPool);
 
     _device.destroy(_sampler);
-    _device.destroy(_imageView);
-    _device.destroy(_image);
-    _device.freeMemory(_imageMemory);
 
     _device.destroy(_pipeline);
     _device.destroy(_pipelineLayout);
@@ -709,7 +711,7 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     commandBuffer.setViewport(0, 1, &_viewport);
     commandBuffer.setScissor(0, 1, &_scissor);
 
-    for(auto& mesh : _model)
+    for(auto& mesh : _model.meshes)
     {
         for(auto& primitive : mesh.primitives)
         {
@@ -919,7 +921,7 @@ void Engine::CreateDescriptorSets()
 
         vk::DescriptorImageInfo imageInfo{};
         imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        imageInfo.imageView = _imageView;
+        imageInfo.imageView = _model.textures[0].imageView;
         imageInfo.sampler = _sampler;
 
         std::array<vk::WriteDescriptorSet, 2> descriptorWrites{};
@@ -944,16 +946,9 @@ void Engine::CreateDescriptorSets()
     }
 }
 
-void Engine::CreateTextureImage()
+void Engine::CreateTextureImage(const Texture& texture, TextureHandle& textureHandle, vk::Format format)
 {
-    int32_t width, height, channels;
-
-    stbi_set_flip_vertically_on_load(true);
-    stbi_uc* pixels = stbi_load("assets/textures/kitty.jpg", &width, &height, &channels, STBI_rgb_alpha);
-    vk::DeviceSize imageSize = width * height * 4;
-
-    if(!pixels)
-        throw std::runtime_error("Failed to load texture!");
+    vk::DeviceSize imageSize = texture.width * texture.height * texture.numChannels;
 
     vk::Buffer stagingBuffer;
     vk::DeviceMemory stagingBufferMemory;
@@ -962,27 +957,25 @@ void Engine::CreateTextureImage()
 
     void* data;
     util::VK_ASSERT(_device.mapMemory(stagingBufferMemory, 0, imageSize, vk::MemoryMapFlags{0}, &data), "Failed mapping image memory!");
-    memcpy(data, pixels, static_cast<size_t>(imageSize));
+    memcpy(data, texture.data.data(), static_cast<size_t>(imageSize));
     _device.unmapMemory(stagingBufferMemory);
 
-    stbi_image_free(pixels);
-
     util::CreateImage(_device, _physicalDevice,
-                      width, height,
-                      vk::Format::eR8G8B8A8Srgb,
+                      texture.width, texture.height,
+                      format,
                       vk::ImageTiling::eOptimal,
                       vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
                       vk::MemoryPropertyFlagBits::eDeviceLocal,
-                      _image, _imageMemory);
+                      textureHandle.image, textureHandle.imageMemory);
 
     vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
-    util::TransitionImageLayout(commandBuffer, _image, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+    util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
     util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
 
-    CopyBufferToImage(stagingBuffer, _image, width, height);
+    CopyBufferToImage(stagingBuffer, textureHandle.image, texture.width, texture.height);
 
     commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
-    util::TransitionImageLayout(commandBuffer, _image, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+    util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
     util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
 
     _device.destroy(stagingBuffer, nullptr);
@@ -1007,11 +1000,6 @@ void Engine::CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t widt
     commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, 1, &region);
 
     util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
-}
-
-void Engine::CreateTextureImageView()
-{
-    _imageView = util::CreateImageView(_device, _image, vk::Format::eR8G8B8A8Srgb, vk::ImageAspectFlagBits::eColor);
 }
 
 void Engine::CreateTextureSampler()
@@ -1043,7 +1031,7 @@ ModelHandle Engine::LoadModel(const Model& model)
 {
     ModelHandle modelHandle{};
 
-    for(const auto& mesh : model)
+    for(const auto& mesh : model.meshes)
     {
         MeshHandle meshHandle{};
 
@@ -1060,7 +1048,21 @@ ModelHandle Engine::LoadModel(const Model& model)
             meshHandle.primitives.emplace_back(primitiveHandle);
         }
 
-        modelHandle.emplace_back(meshHandle);
+        modelHandle.meshes.emplace_back(meshHandle);
+    }
+
+    for(const auto& texture : model.textures)
+    {
+        TextureHandle textureHandle{};
+        textureHandle.format = texture.GetFormat();
+        textureHandle.width = texture.width;
+        textureHandle.height = texture.height;
+        textureHandle.numChannels = texture.numChannels;
+
+        CreateTextureImage(texture, textureHandle, textureHandle.format);
+        textureHandle.imageView = util::CreateImageView(_device, textureHandle.image, texture.GetFormat(), vk::ImageAspectFlagBits::eColor);
+
+        modelHandle.textures.emplace_back(textureHandle);
     }
 
     return modelHandle;

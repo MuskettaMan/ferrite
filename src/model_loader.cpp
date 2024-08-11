@@ -1,6 +1,7 @@
 #include "model_loader.hpp"
 #include "spdlog/spdlog.h"
 #include <fastgltf/tools.hpp>
+#include "stb_image.h"
 
 ModelLoader::ModelLoader() : _parser()
 {
@@ -14,7 +15,8 @@ Model ModelLoader::Load(std::string_view path)
     if(!fileStream.isOpen())
         throw std::runtime_error("Path not found!");
 
-    auto loadedGltf = _parser.loadGltf(fileStream, path, fastgltf::Options::DecomposeNodeMatrices);
+    std::string_view directory = path.substr(0, path.find_last_of('/'));
+    auto loadedGltf = _parser.loadGltf(fileStream, directory, fastgltf::Options::DecomposeNodeMatrices | fastgltf::Options::LoadExternalBuffers | fastgltf::Options::LoadExternalImages);
 
     if(!loadedGltf)
         throw std::runtime_error(getErrorMessage(loadedGltf.error()).data());
@@ -24,19 +26,20 @@ Model ModelLoader::Load(std::string_view path)
     if(gltf.scenes.size() > 1)
         spdlog::warn("GLTF contains more than one scene, but we only load one scene!");
 
-    std::vector<Mesh> meshes{};
+    Model model{};
 
     for(auto& mesh : gltf.meshes)
-    {
-        meshes.emplace_back(ProcessMesh(mesh, gltf));
-    }
+        model.meshes.emplace_back(ProcessMesh(mesh, gltf));
+
+    for(auto& image : gltf.images)
+        model.textures.emplace_back(ProcessImage(image, gltf));
 
     // TODO: Can be used for decoding the hierarchy.
 //    fastgltf::iterateSceneNodes(gltf, 0, fastgltf::math::fmat4x4{}, [](fastgltf::Node& node, fastgltf::math::fmat4x4 nodeTransform) {
 //
 //    });
 
-    return meshes;
+    return model;
 }
 
 Mesh ModelLoader::ProcessMesh(const fastgltf::Mesh& gltfMesh, const fastgltf::Asset& gltf)
@@ -44,9 +47,7 @@ Mesh ModelLoader::ProcessMesh(const fastgltf::Mesh& gltfMesh, const fastgltf::As
     Mesh mesh{};
 
     for(auto& primitive : gltfMesh.primitives)
-    {
         mesh.primitives.emplace_back(ProcessPrimitive(primitive, gltf));
-    }
 
     return mesh;
 }
@@ -129,6 +130,73 @@ MeshPrimitive ModelLoader::ProcessPrimitive(const fastgltf::Primitive& gltfPrimi
     }
 
     return primitive;
+}
+
+Texture ModelLoader::ProcessImage(const fastgltf::Image& gltfImage, const fastgltf::Asset& gltf)
+{
+    Texture texture{};
+
+    auto handleStbiData = [&](stbi_uc* data, uint32_t dataSize)
+    {
+        texture.data = std::vector<std::byte>(dataSize);
+        std::copy(texture.data.begin(), texture.data.end(), reinterpret_cast<std::byte*>(data));
+    };
+
+    std::visit(fastgltf::visitor {
+            [](auto& arg) {},
+            [&](const fastgltf::sources::URI& filePath) {
+                assert(filePath.fileByteOffset == 0); // We don't support offsets with stbi.
+                assert(filePath.uri.isLocalPath()); // We're only capable of loading local files.
+                int32_t width, height, nrChannels;
+
+                const std::string path(filePath.uri.path().begin(), filePath.uri.path().end()); // Thanks C++.
+                stbi_uc* data = stbi_load(path.c_str(), &width, &height, &nrChannels, 4);
+                if(!data) spdlog::error("Failed loading data from STBI at path: {}", path);
+
+                handleStbiData(data, width * height * 4);
+                texture.width = width;
+                texture.height = height;
+                texture.numChannels = 4;
+
+                stbi_image_free(data);
+            },
+            [&](const fastgltf::sources::Array& vector) {
+                int32_t width, height, nrChannels;
+                stbi_uc* data = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(vector.bytes.data()), static_cast<int32_t>(vector.bytes.size()), &width, &height, &nrChannels, 4);
+
+                handleStbiData(data, width * height * 4);
+                texture.width = width;
+                texture.height = height;
+                texture.numChannels = 4;
+
+                stbi_image_free(data);
+            },
+            [&](const fastgltf::sources::BufferView& view) {
+                auto& bufferView = gltf.bufferViews[view.bufferViewIndex];
+                auto& buffer = gltf.buffers[bufferView.bufferIndex];
+
+                std::visit(fastgltf::visitor {
+                        // We only care about VectorWithMime here, because we specify LoadExternalBuffers, meaning
+                        // all buffers are already loaded into a vector.
+                        [](auto& arg) {},
+                        [&](const fastgltf::sources::Array& vector) {
+                            int32_t width, height, nrChannels;
+                            stbi_uc* data = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(vector.bytes.data() + bufferView.byteOffset),
+                                                                        static_cast<int32_t>(bufferView.byteLength), &width, &height, &nrChannels, 4);
+
+                            texture.data = std::vector<std::byte>(width * height * 4);
+                            std::memcpy(texture.data.data(), reinterpret_cast<std::byte*>(data), texture.data.size());
+                            texture.width = width;
+                            texture.height = height;
+                            texture.numChannels = 4;
+
+                            stbi_image_free(data);
+                        }
+                }, buffer.data);
+            },
+    }, gltfImage.data);
+
+    return texture;
 }
 
 vk::PrimitiveTopology ModelLoader::MapGltfTopology(fastgltf::PrimitiveType gltfTopology)

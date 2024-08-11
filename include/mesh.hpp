@@ -34,7 +34,47 @@ struct Mesh
     std::vector<MeshPrimitive> primitives;
 };
 
-using Model = std::vector<Mesh>;
+struct Texture
+{
+    uint32_t width, height, numChannels;
+    std::vector<std::byte> data;
+
+    vk::Format GetFormat() const
+    {
+        return vk::Format::eR8G8B8A8Srgb;
+    }
+};
+
+struct Material
+{
+    uint32_t albedoIndex;
+    glm::vec3 albedoFactor;
+    uint32_t albedoUVChannel;
+
+    uint32_t metallicRoughnessIndex;
+    float metallicFactor;
+    float roughnessFactor;
+    uint32_t metallicRoughnessUVChannel;
+
+    uint32_t normalIndex;
+    float normalScale;
+    uint32_t normalUVChannel;
+
+    uint32_t occlusionIndex;
+    float occlusionStrength;
+    uint32_t occlusionUVChannel;
+
+    uint32_t emissiveIndex;
+    glm::vec3 emissiveFactor;
+    uint32_t emissiveUVChannel;
+};
+
+struct Model
+{
+    std::vector<Mesh> meshes;
+    std::vector<Material> materials;
+    std::vector<Texture> textures;
+};
 
 struct MeshPrimitiveHandle
 {
@@ -53,4 +93,18 @@ struct MeshHandle
     std::vector<MeshPrimitiveHandle> primitives;
 };
 
-using ModelHandle = std::vector<MeshHandle>;
+struct TextureHandle
+{
+    vk::Image image;
+    vk::DeviceMemory imageMemory;
+    vk::ImageView imageView;
+    uint32_t width, height, numChannels;
+    vk::Format format;
+};
+
+struct ModelHandle
+{
+    std::vector<MeshHandle> meshes;
+    std::vector<Material> materials;
+    std::vector<TextureHandle> textures;
+};

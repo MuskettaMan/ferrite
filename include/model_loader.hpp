@@ -20,6 +20,7 @@ private:
 
     Mesh ProcessMesh(const fastgltf::Mesh& gltfMesh, const fastgltf::Asset& gltf);
     MeshPrimitive ProcessPrimitive(const fastgltf::Primitive& primitive, const fastgltf::Asset& gltf);
+    Texture ProcessImage(const fastgltf::Image& gltfImage, const fastgltf::Asset& gltf);
 
     vk::PrimitiveTopology MapGltfTopology(fastgltf::PrimitiveType gltfTopology);
     vk::IndexType MapIndexType(fastgltf::ComponentType componentType);

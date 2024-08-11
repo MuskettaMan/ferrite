@@ -72,9 +72,6 @@ private:
 
     ModelHandle _model;
 
-    vk::Image _image;
-    vk::DeviceMemory _imageMemory;
-    vk::ImageView _imageView;
     vk::Sampler _sampler;
 
     std::unique_ptr<SwapChain> _swapChain;
@@ -142,9 +139,8 @@ private:
     void CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const;
     void CreateUniformBuffers();
     void UpdateUniformData(uint32_t currentFrame);
-    void CreateTextureImage();
+    void CreateTextureImage(const Texture& texture, TextureHandle& textureHandle, vk::Format format);
     void CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
-    void CreateTextureImageView();
     void CreateTextureSampler();
     void CreateDescriptorPool();
     void CreateDescriptorSets();
