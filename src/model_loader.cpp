@@ -31,8 +31,6 @@ Model ModelLoader::Load(std::string_view path)
         meshes.emplace_back(ProcessMesh(mesh, gltf));
     }
 
-
-
     // TODO: Can be used for decoding the hierarchy.
 //    fastgltf::iterateSceneNodes(gltf, 0, fastgltf::math::fmat4x4{}, [](fastgltf::Node& node, fastgltf::math::fmat4x4 nodeTransform) {
 //

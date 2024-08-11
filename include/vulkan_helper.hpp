@@ -5,6 +5,7 @@
 #include <string>
 #include <glm/glm.hpp>
 #include <sstream>
+#include "spdlog/spdlog.h"
 
 namespace util
 {
@@ -214,6 +215,9 @@ namespace util
 
     static void BeginLabel(vk::Queue queue, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi)
     {
+#if defined(LINUX) && defined(NDEBUG)
+        return;
+#endif
         vk::DebugUtilsLabelEXT labelExt{};
         memcpy(labelExt.color.data(), &color.r, sizeof(glm::vec3));
         labelExt.color[3] = 1.0f;
@@ -224,11 +228,17 @@ namespace util
 
     static void EndLabel(vk::Queue queue, const vk::DispatchLoaderDynamic dldi)
     {
+#if defined(LINUX) && defined(NDEBUG)
+        return;
+#endif
         queue.endDebugUtilsLabelEXT(dldi);
     }
 
     static void BeginLabel(vk::CommandBuffer commandBuffer, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi)
     {
+#if defined(LINUX) && defined(NDEBUG)
+        return;
+#endif
         vk::DebugUtilsLabelEXT labelExt{};
         memcpy(labelExt.color.data(), &color.r, sizeof(glm::vec3));
         labelExt.color[3] = 1.0f;
@@ -239,18 +249,26 @@ namespace util
 
     static void EndLabel(vk::CommandBuffer commandBuffer, const vk::DispatchLoaderDynamic dldi)
     {
+#if defined(LINUX) && defined(NDEBUG)
+        return;
+#endif
         commandBuffer.endDebugUtilsLabelEXT(dldi);
     }
 
     template <typename T>
     static void NameObject(T object, std::string_view label, vk::Device device, const vk::DispatchLoaderDynamic dldi)
     {
+#if defined(LINUX) && defined(NDEBUG)
+        return;
+#endif
         vk::DebugUtilsObjectNameInfoEXT nameInfo{};
 
         nameInfo.pObjectName = label.data();
         nameInfo.objectType = object.objectType;
         nameInfo.objectHandle = reinterpret_cast<uint64_t>(static_cast<typename T::CType>(object));
 
-        VK_ASSERT(device.setDebugUtilsObjectNameEXT(&nameInfo, dldi), "Failed naming label");
+        vk::Result result = device.setDebugUtilsObjectNameEXT(&nameInfo, dldi);
+        if (result != vk::Result::eSuccess)
+            spdlog::warn("Failed debug naming object!");
     }
 }

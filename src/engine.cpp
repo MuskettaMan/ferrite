@@ -99,7 +99,6 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
 
     ImGui_ImplVulkan_CreateFontsTexture();
 
-
     ModelLoader modelLoader;
     Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
     _model = LoadModel(model);
@@ -781,7 +780,7 @@ void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::M
 }
 
 template <typename T>
-void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, vk::DeviceMemory& memory, vk::BufferUsageFlags usage, std::string_view label) const
+void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, vk::DeviceMemory& memory, vk::BufferUsageFlags usage) const
 {
     vk::DeviceSize bufferSize = vec.size() * sizeof(T);
 
@@ -799,10 +798,6 @@ void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, vk
                  vk::MemoryPropertyFlagBits::eDeviceLocal, buffer, memory);
 
     CopyBuffer(stagingBuffer, buffer, bufferSize);
-
-    util::NameObject(stagingBuffer, label, _device, _dldi);
-    util::NameObject(stagingBufferMemory, label, _device, _dldi);
-
     _device.destroy(stagingBuffer, nullptr);
     _device.freeMemory(stagingBufferMemory, nullptr);
 }
@@ -1059,8 +1054,8 @@ ModelHandle Engine::LoadModel(const Model& model)
             primitiveHandle.indexType = primitive.indexType;
             primitiveHandle.triangleCount = primitive.indices.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
 
-            CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferMemory, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
-            CreateLocalBuffer(primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferMemory, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
+            CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferMemory, vk::BufferUsageFlagBits::eVertexBuffer);
+            CreateLocalBuffer(primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferMemory, vk::BufferUsageFlagBits::eIndexBuffer);
 
             meshHandle.primitives.emplace_back(primitiveHandle);
         }
