@@ -11,6 +11,7 @@
 #include <glm/glm.hpp>
 #include "engine_init_info.hpp"
 #include "performance_tracker.hpp"
+#include "mesh.hpp"
 
 struct QueueFamilyIndices
 {
@@ -20,50 +21,6 @@ struct QueueFamilyIndices
     bool IsComplete()
     {
         return graphicsFamily.has_value() && presentFamily.has_value();
-    }
-};
-
-struct Vertex
-{
-    enum Enumeration {
-        ePOSITION,
-        eCOLOR,
-        eTEX_COORD
-    };
-
-    glm::vec3 position;
-    glm::vec3 color;
-    glm::vec2 texCoord;
-
-    static vk::VertexInputBindingDescription GetBindingDescription()
-    {
-        vk::VertexInputBindingDescription bindingDesc;
-        bindingDesc.binding = 0;
-        bindingDesc.stride = sizeof(Vertex);
-        bindingDesc.inputRate = vk::VertexInputRate::eVertex;
-
-        return bindingDesc;
-    }
-
-    static std::array<vk::VertexInputAttributeDescription, 3> GetAttributeDescriptions()
-    {
-        std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions{};
-        attributeDescriptions[ePOSITION].binding = 0;
-        attributeDescriptions[ePOSITION].location = 0;
-        attributeDescriptions[ePOSITION].format = vk::Format::eR32G32B32Sfloat;
-        attributeDescriptions[ePOSITION].offset = offsetof(Vertex, position);
-
-        attributeDescriptions[eCOLOR].binding = 0;
-        attributeDescriptions[eCOLOR].location = 1;
-        attributeDescriptions[eCOLOR].format = vk::Format::eR32G32B32Sfloat;
-        attributeDescriptions[eCOLOR].offset = offsetof(Vertex, color);
-
-        attributeDescriptions[eTEX_COORD].binding = 0;
-        attributeDescriptions[eTEX_COORD].location = 2;
-        attributeDescriptions[eTEX_COORD].format = vk::Format::eR32G32Sfloat;
-        attributeDescriptions[eTEX_COORD].offset = offsetof(Vertex, texCoord);
-
-        return attributeDescriptions;
     }
 };
 
@@ -113,10 +70,8 @@ private:
     vk::Rect2D _scissor;
     vk::DispatchLoaderDynamic _dldi;
 
-    vk::Buffer _vertexBuffer;
-    vk::DeviceMemory _vertexBufferMemory;
-    vk::Buffer _indexBuffer;
-    vk::DeviceMemory _indexBufferMemory;
+    ModelHandle _model;
+
     vk::Image _image;
     vk::DeviceMemory _imageMemory;
     vk::ImageView _imageView;
@@ -141,21 +96,6 @@ private:
 
     PerformanceTracker _performanceTracker;
 
-    const std::vector<Vertex> _vertices = {
-            { { -.5f, -.5f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-            { { 0.5f, -.5f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-            { { 0.5f, 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-            { { -.5f, 0.5f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } },
-
-            { { -.5f, -.5f, -.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-            { { 0.5f, -.5f, -.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-            { { 0.5f, 0.5f, -.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-            { { -.5f, 0.5f, -.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } },
-    };
-    const std::vector<uint16_t> _indices = {
-            0, 1, 2, 2, 3, 0,
-            4, 5, 6, 6, 7, 4,
-    };
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> _frameData;
 
     const std::vector<const char*> _validationLayers =
@@ -196,17 +136,17 @@ private:
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
     void CreateSyncObjects();
-    void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& bufferMemory);
-    void CreateVertexBuffer();
-    void CreateIndexBuffer();
-    void CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
+    void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& bufferMemory) const;
+    template <typename T>
+    void CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, vk::DeviceMemory& memory, vk::BufferUsageFlags usage, std::string_view label) const;
+    void CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const;
     void CreateUniformBuffers();
     void UpdateUniformData(uint32_t currentFrame);
     void CreateTextureImage();
     void CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
     void CreateTextureImageView();
     void CreateTextureSampler();
-
     void CreateDescriptorPool();
     void CreateDescriptorSets();
+    ModelHandle LoadModel(const Model& model);
 };

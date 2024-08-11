@@ -21,6 +21,9 @@
 #include "shaders/shader_loader.hpp"
 #include "imgui_impl_vulkan.h"
 #include "stopwatch.hpp"
+#include "model_loader.hpp"
+#include "util.hpp"
+#include "spdlog/spdlog.h"
 
 Engine::Engine()
 {
@@ -63,8 +66,6 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     CreateTextureImageView();
     CreateTextureSampler();
 
-    CreateVertexBuffer();
-    CreateIndexBuffer();
     CreateUniformBuffers();
 
     CreateCommandBuffers();
@@ -97,6 +98,11 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     ImGui_ImplVulkan_Init(&initInfoVulkan);
 
     ImGui_ImplVulkan_CreateFontsTexture();
+
+
+    ModelLoader modelLoader;
+    Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
+    _model = LoadModel(model);
 }
 
 void Engine::Run()
@@ -238,6 +244,18 @@ void Engine::Shutdown()
     if(_enableValidationLayers)
         _instance.destroyDebugUtilsMessengerEXT(_debugMessenger, nullptr, _dldi);
 
+
+    for(auto& mesh : _model)
+    {
+        for(auto& primitive : mesh.primitives)
+        {
+            _device.destroy(primitive.vertexBuffer);
+            _device.destroy(primitive.indexBuffer);
+            _device.free(primitive.vertexBufferMemory);
+            _device.free(primitive.indexBufferMemory);
+        }
+    }
+
     _swapChain.reset();
 
     _device.destroy(_descriptorPool);
@@ -248,12 +266,6 @@ void Engine::Shutdown()
     _device.destroy(_imageView);
     _device.destroy(_image);
     _device.freeMemory(_imageMemory);
-
-    _device.destroy(_vertexBuffer);
-    _device.freeMemory(_vertexBufferMemory);
-
-    _device.destroy(_indexBuffer);
-    _device.freeMemory(_indexBufferMemory);
 
     _device.destroy(_pipeline);
     _device.destroy(_pipelineLayout);
@@ -277,8 +289,12 @@ void Engine::CreateInstance(const InitInfo &initInfo)
     if(_enableValidationLayers && !CheckValidationLayerSupport())
         throw std::runtime_error("Validation layers requested, but not supported!");
 
-    vk::ApplicationInfo appInfo{ "", vk::makeApiVersion(0, 0, 0, 0), "No engine", vk::makeApiVersion(0, 1, 0, 0),
-                                 vk::makeApiVersion(0, 1, 0, 0) };
+    vk::ApplicationInfo appInfo{};
+    appInfo.pApplicationName = "";
+    appInfo.applicationVersion = vk::makeApiVersion(0, 0, 0, 0);
+    appInfo.engineVersion = vk::makeApiVersion(0, 1, 0, 0);
+    appInfo.apiVersion = vk::makeApiVersion(0, 1, 1, 0);
+    appInfo.pEngineName = "No engine";
 
     auto extensions = GetRequiredExtensions(initInfo);
     vk::InstanceCreateInfo createInfo{
@@ -325,7 +341,9 @@ std::vector<const char *> Engine::GetRequiredExtensions(const InitInfo &initInfo
     if(_enableValidationLayers)
         extensions.emplace_back(vk::EXTDebugUtilsExtensionName);
 
+#if LINUX
     extensions.emplace_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+#endif
 
     return extensions;
 }
@@ -542,8 +560,8 @@ void Engine::CreateGraphicsPipeline()
     rasterizationStateCreateInfo.rasterizerDiscardEnable = vk::False;
     rasterizationStateCreateInfo.polygonMode = vk::PolygonMode::eFill;
     rasterizationStateCreateInfo.lineWidth = 1.0f;
-    rasterizationStateCreateInfo.cullMode = vk::CullModeFlagBits::eNone;
-    rasterizationStateCreateInfo.frontFace = vk::FrontFace::eClockwise;
+    rasterizationStateCreateInfo.cullMode = vk::CullModeFlagBits::eBack;
+    rasterizationStateCreateInfo.frontFace = vk::FrontFace::eCounterClockwise;
     rasterizationStateCreateInfo.depthBiasEnable = vk::False;
     rasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
     rasterizationStateCreateInfo.depthBiasClamp = 0.0f;
@@ -654,28 +672,24 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
 
-    vk::ClearValue clear{};
-    clear.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f }; // BGRA unorm
-    clear.depthStencil = vk::ClearDepthStencilValue{ 1.0f, 0 };
-
     vk::RenderingAttachmentInfoKHR colorAttachmentInfo{};
     colorAttachmentInfo.imageView = _swapChain->GetImageView(swapChainImageIndex);
     colorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
     colorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
     colorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear; // NOTE: Check if this can be set to DONTCARE
-    colorAttachmentInfo.clearValue = clear;
+    colorAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
 
     vk::RenderingAttachmentInfoKHR depthAttachmentInfo{};
     depthAttachmentInfo.imageView = _swapChain->GetDepthView();
     depthAttachmentInfo.imageLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
     depthAttachmentInfo.storeOp = vk::AttachmentStoreOp::eDontCare;
     depthAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
-    depthAttachmentInfo.clearValue = clear;
+    depthAttachmentInfo.clearValue.depthStencil = vk::ClearDepthStencilValue{ 1.0f, 0 };
 
     vk::RenderingAttachmentInfoKHR  stencilAttachmentInfo{depthAttachmentInfo};
     stencilAttachmentInfo.storeOp = vk::AttachmentStoreOp::eDontCare;
     stencilAttachmentInfo.loadOp = vk::AttachmentLoadOp::eDontCare;
-    stencilAttachmentInfo.clearValue = clear;
+    stencilAttachmentInfo.clearValue.depthStencil = vk::ClearDepthStencilValue{ 1.0f, 0 };
 
     vk::RenderingInfoKHR renderingInfo{};
     glm::uvec2 displaySize = _swapChain->GetImageSize();
@@ -696,14 +710,23 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     commandBuffer.setViewport(0, 1, &_viewport);
     commandBuffer.setScissor(0, 1, &_scissor);
 
-    vk::Buffer vertexBuffers[] = { _vertexBuffer };
-    vk::DeviceSize offsets[] = { 0 };
-    commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
-    commandBuffer.bindIndexBuffer(_indexBuffer, 0, vk::IndexType::eUint16);
+    for(auto& mesh : _model)
+    {
+        for(auto& primitive : mesh.primitives)
+        {
+            if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
+                throw std::runtime_error("No support for topology other than triangle list!");
 
-    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[_currentFrame].descriptorSet, 0, nullptr);
+            vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
+            vk::DeviceSize offsets[] = { 0 };
+            commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+            commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
 
-    commandBuffer.drawIndexed(_indices.size(), 1, 0, 0, 0);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[_currentFrame].descriptorSet, 0, nullptr);
+
+            commandBuffer.drawIndexed(primitive.triangleCount, 1, 0, 0, 0);
+        }
+    }
 
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
 
@@ -732,7 +755,7 @@ void Engine::CreateSyncObjects()
 }
 
 void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer &buffer,
-                          vk::DeviceMemory &bufferMemory)
+                          vk::DeviceMemory &bufferMemory) const
 {
     vk::BufferCreateInfo bufferInfo{};
     bufferInfo.size = size;
@@ -748,6 +771,8 @@ void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::M
 
     vk::MemoryAllocateInfo allocateInfo{};
     allocateInfo.allocationSize = memoryRequirements.size;
+    if(allocateInfo.allocationSize / 4096 != 0)
+        allocateInfo.allocationSize += allocateInfo.allocationSize - (allocateInfo.allocationSize % 4096);
     allocateInfo.memoryTypeIndex = util::FindMemoryType(_physicalDevice, memoryRequirements.memoryTypeBits, properties);
 
     util::VK_ASSERT(_device.allocateMemory(&allocateInfo, nullptr, &bufferMemory), "Failed allocating memory for the vertex buffer!");
@@ -755,9 +780,10 @@ void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::M
     _device.bindBufferMemory(buffer, bufferMemory, 0);
 }
 
-void Engine::CreateVertexBuffer()
+template <typename T>
+void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, vk::DeviceMemory& memory, vk::BufferUsageFlags usage, std::string_view label) const
 {
-    vk::DeviceSize bufferSize = sizeof(Vertex) * _vertices.size();
+    vk::DeviceSize bufferSize = vec.size() * sizeof(T);
 
     vk::Buffer stagingBuffer;
     vk::DeviceMemory stagingBufferMemory;
@@ -766,47 +792,22 @@ void Engine::CreateVertexBuffer()
 
     void *data;
     util::VK_ASSERT(_device.mapMemory(stagingBufferMemory, 0, bufferSize, vk::MemoryMapFlags{ 0 }, &data), "Failed mapping vertex buffer data to staging buffer!");
-    memcpy(data, _vertices.data(), static_cast<size_t>(bufferSize));
+    memcpy(data, vec.data(), static_cast<size_t>(bufferSize));
     _device.unmapMemory(stagingBufferMemory);
 
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
-                 vk::MemoryPropertyFlagBits::eDeviceLocal, _vertexBuffer, _vertexBufferMemory);
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage,
+                 vk::MemoryPropertyFlagBits::eDeviceLocal, buffer, memory);
 
-    CopyBuffer(stagingBuffer, _vertexBuffer, bufferSize);
+    CopyBuffer(stagingBuffer, buffer, bufferSize);
+
+    util::NameObject(stagingBuffer, label, _device, _dldi);
+    util::NameObject(stagingBufferMemory, label, _device, _dldi);
 
     _device.destroy(stagingBuffer, nullptr);
     _device.freeMemory(stagingBufferMemory, nullptr);
 }
 
-void Engine::CreateIndexBuffer()
-{
-    vk::DeviceSize bufferSize = sizeof(_indices[0]) * _indices.size();
-
-
-    vk::Buffer stagingBuffer;
-    vk::DeviceMemory stagingBufferMemory;
-    CreateBuffer(bufferSize,
-                 vk::BufferUsageFlagBits::eTransferSrc,
-                 vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-                 stagingBuffer, stagingBufferMemory);
-
-    void* data;
-    util::VK_ASSERT(_device.mapMemory(stagingBufferMemory, 0, bufferSize, vk::MemoryMapFlags{ 0 }, &data), "Failed mapping index buffer data to staging buffer!");
-    memcpy(data, _indices.data(), static_cast<size_t>(bufferSize));
-    _device.unmapMemory(stagingBufferMemory);
-
-    CreateBuffer(bufferSize,
-                 vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
-                 vk::MemoryPropertyFlagBits::eDeviceLocal,
-                 _indexBuffer, _indexBufferMemory);
-
-    CopyBuffer(stagingBuffer, _indexBuffer, bufferSize);
-
-    _device.destroy(stagingBuffer, nullptr);
-    _device.freeMemory(stagingBufferMemory, nullptr);
-}
-
-void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size)
+void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const
 {
     vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
 
@@ -842,8 +843,8 @@ void Engine::UpdateUniformData(uint32_t currentFrame)
 
     UBO ubo{};
     ubo.model = glm::rotate(glm::mat4{1.0f}, time * glm::radians(90.0f), glm::vec3{0.0f, 1.0f, 0.0f});
-    ubo.view = glm::lookAt(glm::vec3{2.0f}, glm::vec3{0.0f}, glm::vec3{0.0f, 1.0f, 0.0f});
-    ubo.proj = glm::perspective(glm::radians(45.0f), _swapChain->GetExtent().width / static_cast<float>(_swapChain->GetExtent().height), 0.1f, 100.0f);
+    ubo.view = glm::lookAt(glm::vec3{3.0f}, glm::vec3{0.0f}, glm::vec3{0.0f, 1.0f, 0.0f});
+    ubo.proj = glm::perspective(glm::radians(45.0f), _swapChain->GetExtent().width / static_cast<float>(_swapChain->GetExtent().height), 0.01f, 100.0f);
     ubo.proj[1][1] *= -1;
 
     memcpy(_frameData[currentFrame].uniformBufferMapped, &ubo, sizeof(ubo));
@@ -1041,4 +1042,31 @@ void Engine::CreateTextureSampler()
     createInfo.maxLod = 0.0f;
 
     util::VK_ASSERT(_device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
+}
+
+ModelHandle Engine::LoadModel(const Model& model)
+{
+    ModelHandle modelHandle{};
+
+    for(const auto& mesh : model)
+    {
+        MeshHandle meshHandle{};
+
+        for(const auto& primitive : mesh.primitives)
+        {
+            MeshPrimitiveHandle primitiveHandle{};
+            primitiveHandle.topology = primitive.topology;
+            primitiveHandle.indexType = primitive.indexType;
+            primitiveHandle.triangleCount = primitive.indices.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
+
+            CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferMemory, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
+            CreateLocalBuffer(primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferMemory, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
+
+            meshHandle.primitives.emplace_back(primitiveHandle);
+        }
+
+        modelHandle.emplace_back(meshHandle);
+    }
+
+    return modelHandle;
 }

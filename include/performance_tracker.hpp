@@ -4,6 +4,7 @@
 #include <chrono>
 #include <vector>
 #include <array>
+#include <string>
 
 class PerformanceTracker
 {

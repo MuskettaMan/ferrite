@@ -112,7 +112,7 @@ namespace util
         device.bindImageMemory(image, memory, 0);
     }
 
-    static vk::CommandBuffer BeginSingleTimeCommands(vk::Device device, vk::CommandPool& commandPool)
+    static vk::CommandBuffer BeginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool)
     {
         vk::CommandBufferAllocateInfo allocateInfo{};
         allocateInfo.level = vk::CommandBufferLevel::ePrimary;
@@ -249,7 +249,7 @@ namespace util
 
         nameInfo.pObjectName = label.data();
         nameInfo.objectType = object.objectType;
-        nameInfo.objectHandle = reinterpret_cast<uint64_t>(static_cast<T::CType>(object));
+        nameInfo.objectHandle = reinterpret_cast<uint64_t>(static_cast<typename T::CType>(object));
 
         VK_ASSERT(device.setDebugUtilsObjectNameEXT(&nameInfo, dldi), "Failed naming label");
     }

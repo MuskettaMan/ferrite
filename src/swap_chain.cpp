@@ -109,8 +109,8 @@ void SwapChain::CreateSwapChainImageViews()
         util::VK_ASSERT(_device.createImageView(&createInfo, nullptr, &_imageViews[i]), "Failed creating image view for swap chain!");
 
         vk::DispatchLoaderDynamic dldi = vk::DispatchLoaderDynamic{ _instance, vkGetInstanceProcAddr, _device, vkGetDeviceProcAddr };
-        util::NameObject(_imageViews[i], std::format("Swapchain Image View #{}", i), _device, dldi);
-        util::NameObject(_images[i], std::format("Swapchain Image #{}", i), _device, dldi);
+        util::NameObject(_imageViews[i], "Swapchain Image View", _device, dldi);
+        util::NameObject(_images[i], "Swapchain Image", _device, dldi);
     }
 }
 

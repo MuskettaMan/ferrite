@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 3.25.1)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 set(NAME pi_vulkan)
-set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++ -static-libgcc -static")
+
+# Static linking only on windows.
+if(WIN32)
+    set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++ -static-libgcc -static")
+endif()
 
 project(pi_vulkan)
 
@@ -132,13 +136,22 @@ target_include_directories(pi_vulkan SYSTEM PUBLIC ${FREETYPE_DIR}/include)
 
 set(IMGUI_DIR external/imgui)
 
-file(GLOB_RECURSE IMGUI_SOURCE_FILES ${IMGUI_DIR}/*.cpp)
-file(GLOB_RECURSE IMGUI_SOURCE_FILES_WIN32 ${IMGUI_DIR}/backends/win/*.cpp)
-file(GLOB_RECURSE IMGUI_SOURCE_FILES_LINUX ${IMGUI_DIR}/backends/linux/*.cpp)
+set(IMGUI_SOURCE_FILES
+        ${IMGUI_DIR}/imgui.cpp
+        ${IMGUI_DIR}/imgui_demo.cpp
+        ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp
+        ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMGUI_DIR}/implot.cpp
+        ${IMGUI_DIR}/implot_items.cpp
+        ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
+        ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+)
 if(WIN32)
-    list(REMOVE_ITEM IMGUI_SOURCE_FILES ${IMGUI_SOURCE_FILES_LINUX})
+    list(APPEND IMGUI_SOURCE_FILES ${IMGUI_DIR}/backends/win/imgui_impl_glfw.cpp)
 elseif(LINUX)
-    list(REMOVE_ITEM IMGUI_SOURCE_FILES ${IMGUI_SOURCE_FILES_WIN32})
+    list(APPEND IMGUI_SOURCE_FILES ${IMGUI_DIR}/backends/linux/imgui_impl_xlib.cpp)
 endif()
 
 add_library(imgui STATIC ${IMGUI_SOURCE_FILES})
@@ -157,6 +170,9 @@ include_directories("external/stb")
 
 add_subdirectory(external/spdlog)
 target_link_libraries(pi_vulkan PRIVATE spdlog::spdlog)
+
+add_subdirectory(external/fastgltf)
+target_link_libraries(pi_vulkan PRIVATE fastgltf::fastgltf)
 
 
 # BUILD TYPE SETTINGS
