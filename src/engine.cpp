@@ -38,6 +38,8 @@ Engine::Engine()
 
 void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> application)
 {
+    spdlog::info("Starting engine...");
+
     _application = std::move(application);
 
     CreateInstance(initInfo);
@@ -122,6 +124,8 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     ImGui_ImplVulkan_Init(&initInfoVulkan);
 
     ImGui_ImplVulkan_CreateFontsTexture();
+
+    spdlog::info("Successfully initialized engine!");
 }
 
 void Engine::Run()

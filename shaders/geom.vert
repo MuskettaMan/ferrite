@@ -20,7 +20,7 @@ layout(location = 2) out vec2 texCoord;
 void main()
 {
     position = vec3(ubo.model * vec4(inPosition, 1.0));
-    normal = inNormal;
+    normal = vec3(ubo.model * vec4(inPosition, 1.0));;
     texCoord = inTexCoord;
 
     gl_Position = (ubo.proj * ubo.view) * vec4(position, 1.0);

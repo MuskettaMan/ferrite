@@ -216,7 +216,7 @@ namespace util
 
     static void BeginLabel(vk::Queue queue, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi)
     {
-#if defined(LINUX) && defined(NDEBUG)
+#if defined(NDEBUG)
         return;
 #endif
         vk::DebugUtilsLabelEXT labelExt{};
@@ -229,7 +229,7 @@ namespace util
 
     static void EndLabel(vk::Queue queue, const vk::DispatchLoaderDynamic dldi)
     {
-#if defined(LINUX) && defined(NDEBUG)
+#if defined(NDEBUG)
         return;
 #endif
         queue.endDebugUtilsLabelEXT(dldi);
@@ -237,7 +237,7 @@ namespace util
 
     static void BeginLabel(vk::CommandBuffer commandBuffer, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi)
     {
-#if defined(LINUX) && defined(NDEBUG)
+#if defined(NDEBUG)
         return;
 #endif
         vk::DebugUtilsLabelEXT labelExt{};
@@ -250,7 +250,7 @@ namespace util
 
     static void EndLabel(vk::CommandBuffer commandBuffer, const vk::DispatchLoaderDynamic dldi)
     {
-#if defined(LINUX) && defined(NDEBUG)
+#if defined(NDEBUG)
         return;
 #endif
         commandBuffer.endDebugUtilsLabelEXT(dldi);
@@ -259,7 +259,7 @@ namespace util
     template <typename T>
     static void NameObject(T object, std::string_view label, vk::Device device, const vk::DispatchLoaderDynamic dldi)
     {
-#if defined(LINUX) && defined(NDEBUG)
+#if defined(NDEBUG)
         return;
 #endif
         vk::DebugUtilsObjectNameInfoEXT nameInfo{};

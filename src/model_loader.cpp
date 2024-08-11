@@ -39,6 +39,8 @@ Model ModelLoader::Load(std::string_view path)
 //
 //    });
 
+    spdlog::info("Loaded model: {}", path);
+
     return model;
 }
 
