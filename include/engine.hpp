@@ -144,5 +144,6 @@ private:
     void CreateTextureSampler();
     void CreateDescriptorPool();
     void CreateDescriptorSets();
+    void UpdateDescriptorSet(uint32_t frameIndex, vk::ImageView texture);
     ModelHandle LoadModel(const Model& model);
 };

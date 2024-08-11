@@ -718,6 +718,8 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
             if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
                 throw std::runtime_error("No support for topology other than triangle list!");
 
+            UpdateDescriptorSet(_currentFrame, _model.textures[0].imageView);
+
             vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
             vk::DeviceSize offsets[] = { 0 };
             commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
@@ -849,7 +851,7 @@ void Engine::UpdateUniformData(uint32_t currentFrame)
 
 void Engine::CreateDescriptorSetLayout()
 {
-    std::array<vk::DescriptorSetLayoutBinding, 2> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
 
     vk::DescriptorSetLayoutBinding& descriptorSetLayoutBinding{ bindings[0] };
     descriptorSetLayoutBinding.binding = 0;
@@ -861,10 +863,16 @@ void Engine::CreateDescriptorSetLayout()
     vk::DescriptorSetLayoutBinding& samplerLayoutBinding{ bindings[1] };
     samplerLayoutBinding.binding = 1;
     samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    samplerLayoutBinding.descriptorType = vk::DescriptorType::eSampler;
     samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
     samplerLayoutBinding.pImmutableSamplers = nullptr;
 
+    vk::DescriptorSetLayoutBinding& imageLayoutBinding{ bindings[2] };
+    imageLayoutBinding.binding = 2;
+    imageLayoutBinding.descriptorCount = 1;
+    imageLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
+    imageLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+    imageLayoutBinding.pImmutableSamplers = nullptr;
 
     vk::DescriptorSetLayoutCreateInfo createInfo{};
     createInfo.bindingCount = bindings.size();
@@ -914,35 +922,7 @@ void Engine::CreateDescriptorSets()
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        vk::DescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = _frameData[i].uniformBuffer;
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(UBO);
-
-        vk::DescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        imageInfo.imageView = _model.textures[0].imageView;
-        imageInfo.sampler = _sampler;
-
-        std::array<vk::WriteDescriptorSet, 2> descriptorWrites{};
-
-        vk::WriteDescriptorSet& bufferWrite{ descriptorWrites[0] };
-        bufferWrite.dstSet = _frameData[i].descriptorSet;
-        bufferWrite.dstBinding = 0;
-        bufferWrite.dstArrayElement = 0;
-        bufferWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
-        bufferWrite.descriptorCount = 1;
-        bufferWrite.pBufferInfo = &bufferInfo;
-
-        vk::WriteDescriptorSet& imageWrite{ descriptorWrites[1] };
-        imageWrite.dstSet = _frameData[i].descriptorSet;
-        imageWrite.dstBinding = 1;
-        imageWrite.dstArrayElement = 0;
-        imageWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-        imageWrite.descriptorCount = 1;
-        imageWrite.pImageInfo = &imageInfo;
-
-        _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+        UpdateDescriptorSet(i, _model.textures[0].imageView);
     }
 }
 
@@ -1025,6 +1005,49 @@ void Engine::CreateTextureSampler()
     createInfo.maxLod = 0.0f;
 
     util::VK_ASSERT(_device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
+}
+
+void Engine::UpdateDescriptorSet(uint32_t frameIndex, vk::ImageView texture)
+{
+    vk::DescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = _frameData[frameIndex].uniformBuffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(UBO);
+
+    vk::DescriptorImageInfo samplerInfo{};
+    samplerInfo.sampler = _sampler;
+
+    vk::DescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    imageInfo.imageView = texture;
+
+    std::array<vk::WriteDescriptorSet, 3> descriptorWrites{};
+
+    vk::WriteDescriptorSet& bufferWrite{ descriptorWrites[0] };
+    bufferWrite.dstSet = _frameData[frameIndex].descriptorSet;
+    bufferWrite.dstBinding = 0;
+    bufferWrite.dstArrayElement = 0;
+    bufferWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+    bufferWrite.descriptorCount = 1;
+    bufferWrite.pBufferInfo = &bufferInfo;
+
+    vk::WriteDescriptorSet& samplerWrite{ descriptorWrites[1] };
+    samplerWrite.dstSet = _frameData[frameIndex].descriptorSet;
+    samplerWrite.dstBinding = 1;
+    samplerWrite.dstArrayElement = 0;
+    samplerWrite.descriptorType = vk::DescriptorType::eSampler;
+    samplerWrite.descriptorCount = 1;
+    samplerWrite.pImageInfo = &samplerInfo;
+
+    vk::WriteDescriptorSet& imageWrite{ descriptorWrites[2] };
+    imageWrite.dstSet = _frameData[frameIndex].descriptorSet;
+    imageWrite.dstBinding = 2;
+    imageWrite.dstArrayElement = 0;
+    imageWrite.descriptorType = vk::DescriptorType::eSampledImage;
+    imageWrite.descriptorCount = 1;
+    imageWrite.pImageInfo = &imageInfo;
+
+    _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }
 
 ModelHandle Engine::LoadModel(const Model& model)
