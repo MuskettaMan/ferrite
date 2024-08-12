@@ -56,7 +56,7 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
 
     CreateDescriptorSetLayout();
-    InitializeDeferredRTs();
+    _gBuffers = std::make_unique<GBuffers<MAX_FRAMES_IN_FLIGHT, DEFERRED_ATTACHMENT_COUNT>>(_brain, _swapChain->GetImageSize());
 
     CreateGeometryPipeline();
     CreateLightingPipeline();
@@ -240,12 +240,6 @@ Engine::~Engine()
     {
         vmaUnmapMemory(_brain.vmaAllocator, _frameData[i].uniformBufferAllocation);
         vmaDestroyBuffer(_brain.vmaAllocator, _frameData[i].uniformBuffer, _frameData[i].uniformBufferAllocation);
-
-        vmaDestroyImage(_brain.vmaAllocator, _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation);
-        for(size_t j = 0; j < _frameData[i].gBufferViews.size(); ++j)
-        {
-            _brain.device.destroy(_frameData[i].gBufferViews[j]);
-        }
     }
 
     _brain.device.destroy(_geometryDescriptorSetLayout);
@@ -334,7 +328,7 @@ void Engine::CreateGeometryPipeline()
     multisampleStateCreateInfo.alphaToCoverageEnable = vk::False;
     multisampleStateCreateInfo.alphaToOneEnable = vk::False;
 
-    std::array<vk::PipelineColorBlendAttachmentState, FrameData::DEFERRED_ATTACHMENT_COUNT> colorBlendAttachmentStates{};
+    std::array<vk::PipelineColorBlendAttachmentState, DEFERRED_ATTACHMENT_COUNT> colorBlendAttachmentStates{};
     for(auto& blendAttachmentState : colorBlendAttachmentStates)
     {
         blendAttachmentState.blendEnable = vk::False;
@@ -374,9 +368,9 @@ void Engine::CreateGeometryPipeline()
     geometryPipelineCreateInfo.basePipelineIndex = -1;
 
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
-    std::array<vk::Format, FrameData::DEFERRED_ATTACHMENT_COUNT> formats{};
+    std::array<vk::Format, DEFERRED_ATTACHMENT_COUNT> formats{};
     std::fill(formats.begin(), formats.end(), vk::Format::eR16G16B16A16Sfloat);
-    pipelineRenderingCreateInfoKhr.colorAttachmentCount = FrameData::DEFERRED_ATTACHMENT_COUNT;
+    pipelineRenderingCreateInfoKhr.colorAttachmentCount = DEFERRED_ATTACHMENT_COUNT;
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = formats.data();
     pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
 
@@ -529,15 +523,15 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
 
-    util::TransitionImageLayout(commandBuffer, _frameData[_currentFrame].gBuffersImageArray,
+    util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),
                                 vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
-                                FrameData::DEFERRED_ATTACHMENT_COUNT);
+                                DEFERRED_ATTACHMENT_COUNT);
 
-    std::array<vk::RenderingAttachmentInfoKHR, FrameData::DEFERRED_ATTACHMENT_COUNT> colorAttachmentInfos{};
+    std::array<vk::RenderingAttachmentInfoKHR, DEFERRED_ATTACHMENT_COUNT> colorAttachmentInfos{};
     for(size_t i = 0; i < colorAttachmentInfos.size(); ++i)
     {
         vk::RenderingAttachmentInfoKHR& info{ colorAttachmentInfos[i] };
-        info.imageView = _frameData[_currentFrame].gBufferViews[i];
+        info.imageView = _gBuffers->GBufferView(_currentFrame, i);
         info.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
         info.storeOp = vk::AttachmentStoreOp::eStore;
         info.loadOp = vk::AttachmentLoadOp::eClear;
@@ -602,9 +596,9 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     util::EndLabel(commandBuffer, _brain.dldi);
 
 
-    util::TransitionImageLayout(commandBuffer, _frameData[_currentFrame].gBuffersImageArray,
+    util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),
                                 vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
-                                FrameData::DEFERRED_ATTACHMENT_COUNT);
+                                DEFERRED_ATTACHMENT_COUNT);
 
     vk::RenderingAttachmentInfoKHR finalColorAttachmentInfo{};
     finalColorAttachmentInfo.imageView = _swapChain->GetImageView(swapChainImageIndex);
@@ -760,7 +754,7 @@ void Engine::CreateDescriptorSetLayout()
 
     // Lighting
     {
-        std::array<vk::DescriptorSetLayoutBinding, FrameData::DEFERRED_ATTACHMENT_COUNT + 1> bindings{};
+        std::array<vk::DescriptorSetLayoutBinding, DEFERRED_ATTACHMENT_COUNT + 1> bindings{};
 
         vk::DescriptorSetLayoutBinding& samplerLayoutBinding{bindings[0]};
         samplerLayoutBinding.binding = 0;
@@ -939,14 +933,14 @@ void Engine::UpdateLightingDescriptorSet(uint32_t frameIndex)
     vk::DescriptorImageInfo samplerInfo{};
     samplerInfo.sampler = _sampler;
 
-    std::array<vk::DescriptorImageInfo, FrameData::DEFERRED_ATTACHMENT_COUNT> imageInfo{};
+    std::array<vk::DescriptorImageInfo, DEFERRED_ATTACHMENT_COUNT> imageInfo{};
     for(size_t i = 0; i < imageInfo.size(); ++i)
     {
         imageInfo[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        imageInfo[i].imageView = _frameData[frameIndex].gBufferViews[i];
+        imageInfo[i].imageView = _gBuffers->GBufferView(frameIndex, i);
     }
 
-    std::array<vk::WriteDescriptorSet, FrameData::DEFERRED_ATTACHMENT_COUNT + 1> descriptorWrites{};
+    std::array<vk::WriteDescriptorSet, DEFERRED_ATTACHMENT_COUNT + 1> descriptorWrites{};
     descriptorWrites[0].dstSet = _frameData[frameIndex].lightingDescriptorSet;
     descriptorWrites[0].dstBinding = 0;
     descriptorWrites[0].dstArrayElement = 0;
@@ -1036,36 +1030,6 @@ ModelHandle Engine::LoadModel(const Model& model)
     }
 
     return modelHandle;
-}
-
-void Engine::InitializeDeferredRTs()
-{
-    vk::Format format = vk::Format::eR16G16B16A16Sfloat;
-    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-    {
-        uint32_t width = _swapChain->GetImageSize().x;
-        uint32_t height = _swapChain->GetImageSize().y;
-        util::CreateImage(_brain.vmaAllocator, width, height, format,
-                          vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-                          _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation, "GBuffer array", FrameData::DEFERRED_ATTACHMENT_COUNT);
-        util::NameObject(_frameData[i].gBuffersImageArray, "[IMAGE] GBuffer Array", _brain.device, _brain.dldi);
-
-        for(size_t j = 0; j < FrameData::DEFERRED_ATTACHMENT_COUNT; ++j)
-        {
-            _frameData[i].gBufferViews[j] = util::CreateImageView(_brain.device, _frameData[i].gBuffersImageArray, format, vk::ImageAspectFlagBits::eColor, j);
-            std::string name = "[VIEW] GBuffer ";
-            if(i == 0) name = "RGB: Albedo A: Metallic";
-            else if(i == 1) name = "RGB: Normal A: Roughness";
-            else if(i == 2) name = "RGB: Emissive A: AO";
-            else if(i == 3) name = "RGB: Position A: Unused";
-
-            util::NameObject(_frameData[i].gBufferViews[j], name, _brain.device, _brain.dldi);
-        }
-
-        vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
-        util::TransitionImageLayout(cb, _frameData[i].gBuffersImageArray, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, FrameData::DEFERRED_ATTACHMENT_COUNT);
-        util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
-    }
 }
 
 MaterialHandle Engine::CreateMaterial(const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info)

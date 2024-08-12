@@ -13,6 +13,7 @@
 #include "performance_tracker.hpp"
 #include "mesh.hpp"
 #include "vulkan_brain.hpp"
+#include "gbuffers.hpp"
 
 struct UBO
 {
@@ -23,7 +24,6 @@ struct UBO
 
 struct FrameData
 {
-    const static uint32_t DEFERRED_ATTACHMENT_COUNT = 4;
 
     vk::Buffer uniformBuffer;
     VmaAllocation uniformBufferAllocation;
@@ -31,15 +31,13 @@ struct FrameData
     vk::DescriptorSet geometryDescriptorSet;
     vk::DescriptorSet lightingDescriptorSet;
 
-    vk::Image gBuffersImageArray;
-    VmaAllocation gBufferAllocation;
-    std::array<vk::ImageView, DEFERRED_ATTACHMENT_COUNT> gBufferViews;
 };
 
 class Engine
 {
 public:
     const static uint32_t MAX_FRAMES_IN_FLIGHT{ 3 };
+    const static uint32_t DEFERRED_ATTACHMENT_COUNT = { 4 };
 
     Engine(const InitInfo& initInfo, std::shared_ptr<Application> application);
     ~Engine();
@@ -69,6 +67,7 @@ private:
     vk::Sampler _sampler;
 
     std::unique_ptr<SwapChain> _swapChain;
+    std::unique_ptr<GBuffers<MAX_FRAMES_IN_FLIGHT, DEFERRED_ATTACHMENT_COUNT>> _gBuffers;
 
 
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _imageAvailableSemaphores;
@@ -103,7 +102,6 @@ private:
     void UpdateLightingDescriptorSet(uint32_t frameIndex);
     ModelHandle LoadModel(const Model& model);
 
-    void InitializeDeferredRTs();
     MaterialHandle CreateMaterial(const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info);
     void CreateDefaultMaterial();
 };
