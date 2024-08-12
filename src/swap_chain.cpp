@@ -3,14 +3,8 @@
 #include "vulkan/vulkan.h"
 #include "engine.hpp"
 
-SwapChain::SwapChain(vk::Device device, vk::PhysicalDevice physicalDevice, vk::Instance instance, vk::CommandPool commandPool, VmaAllocator allocator, vk::Queue graphicsQueue, vk::SurfaceKHR surface, vk::Format depthFormat) :
-    _device(device),
-    _physicalDevice(physicalDevice),
-    _instance(instance),
-    _commandPool(commandPool),
-    _allocator(allocator),
-    _graphicsQueue(graphicsQueue),
-    _surface(surface),
+SwapChain::SwapChain(const VulkanBrain& brain, vk::Format depthFormat) :
+    _brain(brain),
     _depthFormat(depthFormat)
 {
 }
@@ -23,7 +17,7 @@ SwapChain::~SwapChain()
 void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices)
 {
     _imageSize = screenSize;
-    SupportDetails swapChainSupport = QuerySupport(_physicalDevice, _surface);
+    SupportDetails swapChainSupport = QuerySupport(_brain.physicalDevice, _brain.surface);
 
     auto surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
     auto presentMode = ChoosePresentMode(swapChainSupport.presentModes);
@@ -34,7 +28,7 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
         imageCount = swapChainSupport.capabilities.maxImageCount;
 
     vk::SwapchainCreateInfoKHR createInfo{};
-    createInfo.surface = _surface;
+    createInfo.surface = _brain.surface;
     createInfo.minImageCount = imageCount + 1;
     createInfo.imageFormat = surfaceFormat.format;
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
@@ -66,12 +60,12 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
     createInfo.clipped = vk::True;
     createInfo.oldSwapchain = nullptr;
 
-    util::VK_ASSERT(_device.createSwapchainKHR(&createInfo, nullptr, &_swapChain), "Failed creating swap chain!");
+    util::VK_ASSERT(_brain.device.createSwapchainKHR(&createInfo, nullptr, &_swapChain), "Failed creating swap chain!");
 
-    vk::DispatchLoaderDynamic dldi = vk::DispatchLoaderDynamic{ _instance, vkGetInstanceProcAddr, _device, vkGetDeviceProcAddr };
-    util::NameObject(_swapChain, "Main Swapchain", _device, dldi);
+    vk::DispatchLoaderDynamic dldi = vk::DispatchLoaderDynamic{ _brain.instance, vkGetInstanceProcAddr, _brain.device, vkGetDeviceProcAddr };
+    util::NameObject(_swapChain, "Main Swapchain", _brain.device, dldi);
 
-    _images = _device.getSwapchainImagesKHR(_swapChain);
+    _images = _brain.device.getSwapchainImagesKHR(_swapChain);
     _format = surfaceFormat.format;
     _extent = extent;
 
@@ -81,7 +75,7 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
 
 void SwapChain::RecreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices)
 {
-    _device.waitIdle();
+    _brain.device.waitIdle();
 
     CleanUpSwapChain();
 
@@ -107,11 +101,11 @@ void SwapChain::CreateSwapChainImageViews()
                         1  // layer count
                 }
         };
-        util::VK_ASSERT(_device.createImageView(&createInfo, nullptr, &_imageViews[i]), "Failed creating image view for swap chain!");
+        util::VK_ASSERT(_brain.device.createImageView(&createInfo, nullptr, &_imageViews[i]), "Failed creating image view for swap chain!");
 
-        vk::DispatchLoaderDynamic dldi = vk::DispatchLoaderDynamic{ _instance, vkGetInstanceProcAddr, _device, vkGetDeviceProcAddr };
-        util::NameObject(_imageViews[i], "Swapchain Image View", _device, dldi);
-        util::NameObject(_images[i], "Swapchain Image", _device, dldi);
+        vk::DispatchLoaderDynamic dldi = vk::DispatchLoaderDynamic{ _brain.instance, vkGetInstanceProcAddr, _brain.device, vkGetDeviceProcAddr };
+        util::NameObject(_imageViews[i], "Swapchain Image View", _brain.device, dldi);
+        util::NameObject(_images[i], "Swapchain Image", _brain.device, dldi);
     }
 }
 
@@ -168,26 +162,26 @@ vk::Extent2D SwapChain::ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capab
 void SwapChain::CleanUpSwapChain()
 {
     for(auto imageView : _imageViews)
-        _device.destroy(imageView);
+        _brain.device.destroy(imageView);
 
-    _device.destroy(_swapChain);
+    _brain.device.destroy(_swapChain);
 
-    _device.destroy(_depthImage);
-    _device.destroy(_depthImageView);
-    vmaFreeMemory(_allocator, _depthImageAllocation);
+    _brain.device.destroy(_depthImage);
+    _brain.device.destroy(_depthImageView);
+    vmaFreeMemory(_brain.vmaAllocator, _depthImageAllocation);
 }
 
 void SwapChain::CreateDepthResources(const glm::uvec2& screenSize)
 {
-    util::CreateImage(_allocator, screenSize.x, screenSize.y,
+    util::CreateImage(_brain.vmaAllocator, screenSize.x, screenSize.y,
                       _depthFormat, vk::ImageTiling::eOptimal,
                       vk::ImageUsageFlagBits::eDepthStencilAttachment,
                       _depthImage, _depthImageAllocation, "Depth image");
 
-    _depthImageView = util::CreateImageView(_device, _depthImage, _depthFormat, vk::ImageAspectFlagBits::eDepth);
+    _depthImageView = util::CreateImageView(_brain.device, _depthImage, _depthFormat, vk::ImageAspectFlagBits::eDepth);
 
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
+    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
     util::TransitionImageLayout(commandBuffer, _depthImage, _depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
-    util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
+    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, commandBuffer, _brain.commandPool);
 }
 

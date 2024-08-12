@@ -29,8 +29,6 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
     glfwGetWindowSize(_window, &width, &height);
     _width = width;
     _height = height;
-
-    ImGui_ImplGlfw_InitForVulkan(_window, true);
 }
 
 void WinApp::Run(std::function<void()> updateLoop)
@@ -73,8 +71,6 @@ InitInfo WinApp::GetInitInfo()
         util::VK_ASSERT(glfwCreateWindowSurface(instance, this->_window, nullptr, &surface), "Failed creating GLFW surface!");
         return vk::SurfaceKHR(surface);
     };
-    initInfo.newImGuiFrame = ImGui_ImplGlfw_NewFrame;
-    initInfo.shutdownImGui = ImGui_ImplGlfw_Shutdown;
 
     return initInfo;
 }
@@ -83,5 +79,20 @@ bool WinApp::IsMinimized()
 {
     int32_t result = glfwGetWindowAttrib(_window, GLFW_ICONIFIED);
     return static_cast<bool>(result);
+}
+
+void WinApp::InitImGui()
+{
+    ImGui_ImplGlfw_InitForVulkan(_window, true);
+}
+
+void WinApp::NewImGuiFrame()
+{
+    ImGui_ImplGlfw_NewFrame();
+}
+
+void WinApp::ShutdownImGui()
+{
+    ImGui_ImplGlfw_Shutdown();
 }
 

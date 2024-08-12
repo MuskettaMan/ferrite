@@ -26,6 +26,9 @@ public:
 
     virtual ~Application();
     virtual void Run(std::function<void()> updateLoop) = 0;
+    virtual void InitImGui() = 0;
+    virtual void NewImGuiFrame() = 0;
+    virtual void ShutdownImGui() = 0;
 
 protected:
     uint32_t _width, _height;

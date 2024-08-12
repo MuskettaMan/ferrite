@@ -11,11 +11,10 @@
 #include <spdlog/spdlog.h>
 
 std::shared_ptr<Application> g_app;
-std::shared_ptr<Engine> g_engine;
+std::unique_ptr<Engine> g_engine;
 
 int main()
 {
-    g_engine = std::make_shared<Engine>();
 
     Application::CreateParameters parameters{ "Vulkan", true };
 
@@ -25,7 +24,7 @@ int main()
     g_app = std::make_shared<LinuxApp>(parameters);
 #endif
 
-    g_engine->Init(g_app->GetInitInfo(), g_app);
+    g_engine = std::make_unique<Engine>(g_app->GetInitInfo(), g_app);
 
     try
     {
@@ -37,7 +36,7 @@ int main()
         return EXIT_FAILURE;
     }
 
-    g_engine->Shutdown();
+    g_engine.reset();
 
     return EXIT_SUCCESS;
 }

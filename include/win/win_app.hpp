@@ -12,6 +12,9 @@ public:
     glm::uvec2 DisplaySize() override;
     InitInfo GetInitInfo() override;
     bool IsMinimized() override;
+    void InitImGui() override;
+    void NewImGuiFrame() override;
+    void ShutdownImGui() override;
 
 private:
     GLFWwindow* _window;

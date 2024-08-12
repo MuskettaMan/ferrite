@@ -112,8 +112,6 @@ LinuxApp::LinuxApp(const CreateParameters& parameters) : Application(parameters)
 
     xcb_map_window(_connection, _window);
     xcb_flush(_connection);
-
-    ImGui_ImplXlib_Init(_display, _window);
 }
 
 void LinuxApp::Run(std::function<void()> updateLoop)
@@ -209,8 +207,6 @@ InitInfo LinuxApp::GetInitInfo()
 
         return vk::SurfaceKHR{ surface };
     };
-    initInfo.newImGuiFrame = ImGui_ImplXlib_NewFrame;
-    initInfo.shutdownImGui = ImGui_ImplXlib_Shutdown;
 
     return initInfo;
 }
@@ -218,4 +214,19 @@ InitInfo LinuxApp::GetInitInfo()
 bool LinuxApp::IsMinimized()
 {
     return false;
+}
+
+void LinuxApp::InitImGui()
+{
+    ImGui_ImplXlib_Init(_display, _window);
+}
+
+void LinuxApp::NewImGuiFrame()
+{
+    ImGui_ImplXlib_NewFrame();
+}
+
+void LinuxApp::ShutdownImGui()
+{
+    ImGui_ImplXlib_Shutdown();
 }

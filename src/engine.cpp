@@ -3,7 +3,6 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
-#include <map>
 #include <set>
 #include <implot.h>
 #include <thread>
@@ -33,53 +32,27 @@
 #include "stopwatch.hpp"
 #include "model_loader.hpp"
 #include "util.hpp"
+#include "vulkan_brain.hpp"
 
-Engine::Engine()
+Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> application) :
+    _brain(initInfo)
 {
     ImGui::CreateContext();
     ImPlot::CreateContext();
-}
-
-void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> application)
-{
     spdlog::info("Starting engine...");
 
     _application = std::move(application);
 
-    CreateInstance(initInfo);
-    _dldi = vk::DispatchLoaderDynamic{ _instance, vkGetInstanceProcAddr, _device, vkGetDeviceProcAddr };
 
-    SetupDebugMessenger();
-
-    _surface = initInfo.retrieveSurface(_instance);
-
-    PickPhysicalDevice();
-    CreateDevice();
-    CreateCommandPool();
-
-    VmaVulkanFunctions vulkanFunctions = {};
-    vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
-    vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
-
-    VmaAllocatorCreateInfo vmaAllocatorCreateInfo{};
-    vmaAllocatorCreateInfo.physicalDevice = _physicalDevice;
-    vmaAllocatorCreateInfo.device = _device;
-    vmaAllocatorCreateInfo.instance = _instance;
-    vmaAllocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
-    vmaAllocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
-    vmaCreateAllocator(&vmaAllocatorCreateInfo, &_vmaAllocator);
-
-
-    auto supportedDepthFormat = util::FindSupportedFormat(_physicalDevice, { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
-                                               vk::ImageTiling::eOptimal,
-                                               vk::FormatFeatureFlagBits::eDepthStencilAttachment);
+    auto supportedDepthFormat = util::FindSupportedFormat(_brain.physicalDevice, { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
+                                                          vk::ImageTiling::eOptimal,
+                                                          vk::FormatFeatureFlagBits::eDepthStencilAttachment);
 
     assert(supportedDepthFormat.has_value() && "No supported depth format!");
 
-    _swapChain = std::make_unique<SwapChain>(_device, _physicalDevice, _instance, _commandPool, _vmaAllocator, _graphicsQueue, _surface, supportedDepthFormat.value());
+    _swapChain = std::make_unique<SwapChain>(_brain, supportedDepthFormat.value());
 
-    QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
-    _swapChain->CreateSwapChain(glm::uvec2{ initInfo.width, initInfo.height }, familyIndices);
+    _swapChain->CreateSwapChain(glm::uvec2{ initInfo.width, initInfo.height }, _brain.queueFamilyIndices);
 
 
     CreateDescriptorSetLayout();
@@ -94,7 +67,6 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
 
     CreateCommandBuffers();
     CreateSyncObjects();
-    CreateDescriptorPool();
 
     CreateDefaultMaterial();
 
@@ -106,26 +78,25 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
 
     CreateDescriptorSets();
 
-    _newImGuiFrame = initInfo.newImGuiFrame;
-    _shutdownImGui = initInfo.shutdownImGui;
-
     vk::Format format = _swapChain->GetFormat();
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
     pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
 
+    _application->InitImGui();
+
     ImGui_ImplVulkan_InitInfo initInfoVulkan{};
     initInfoVulkan.UseDynamicRendering = true;
     initInfoVulkan.PipelineRenderingCreateInfo = static_cast<VkPipelineRenderingCreateInfo>(pipelineRenderingCreateInfoKhr);
-    initInfoVulkan.PhysicalDevice = _physicalDevice;
-    initInfoVulkan.Device = _device;
+    initInfoVulkan.PhysicalDevice = _brain.physicalDevice;
+    initInfoVulkan.Device = _brain.device;
     initInfoVulkan.ImageCount = MAX_FRAMES_IN_FLIGHT;
-    initInfoVulkan.Instance = _instance;
+    initInfoVulkan.Instance = _brain.instance;
     initInfoVulkan.MSAASamples = VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT;
-    initInfoVulkan.Queue = _graphicsQueue;
-    initInfoVulkan.QueueFamily = familyIndices.graphicsFamily.value();
-    initInfoVulkan.DescriptorPool = _descriptorPool;
+    initInfoVulkan.Queue = _brain.graphicsQueue;
+    initInfoVulkan.QueueFamily = _brain.queueFamilyIndices.graphicsFamily.value();
+    initInfoVulkan.DescriptorPool = _brain.descriptorPool;
     initInfoVulkan.MinImageCount = 2;
     initInfoVulkan.ImageCount = _swapChain->GetImageCount();
     ImGui_ImplVulkan_Init(&initInfoVulkan);
@@ -145,28 +116,27 @@ void Engine::Run()
         return;
     }
 
-    util::VK_ASSERT(_device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()),
+    util::VK_ASSERT(_brain.device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()),
                     "Failed waiting on in flight fence!");
 
     uint32_t imageIndex;
-    vk::Result result = _device.acquireNextImageKHR(_swapChain->GetSwapChain(), std::numeric_limits<uint64_t>::max(),
+    vk::Result result = _brain.device.acquireNextImageKHR(_swapChain->GetSwapChain(), std::numeric_limits<uint64_t>::max(),
                                                     _imageAvailableSemaphores[_currentFrame], nullptr, &imageIndex);
 
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
     {
-        QueueFamilyIndices familyIndices = FindQueueFamilies(_physicalDevice);
-        _swapChain->RecreateSwapChain(_application->DisplaySize(), familyIndices);
+        _swapChain->RecreateSwapChain(_application->DisplaySize(), _brain.queueFamilyIndices);
 
         return;
     } else
         util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
 
-    util::VK_ASSERT(_device.resetFences(1, &_inFlightFences[_currentFrame]), "Failed resetting fences!");
+    util::VK_ASSERT(_brain.device.resetFences(1, &_inFlightFences[_currentFrame]), "Failed resetting fences!");
 
     UpdateUniformData(_currentFrame);
 
     ImGui_ImplVulkan_NewFrame();
-    _newImGuiFrame();
+    _application->NewImGuiFrame();
     ImGui::NewFrame();
 
     _performanceTracker.Render();
@@ -190,7 +160,7 @@ void Engine::Run()
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    util::VK_ASSERT(_graphicsQueue.submit(1, &submitInfo, _inFlightFences[_currentFrame]), "Failed submitting to graphics queue!");
+    util::VK_ASSERT(_brain.graphicsQueue.submit(1, &submitInfo, _inFlightFences[_currentFrame]), "Failed submitting to graphics queue!");
 
     vk::PresentInfoKHR presentInfo{};
     presentInfo.waitSemaphoreCount = 1;
@@ -201,13 +171,13 @@ void Engine::Run()
     presentInfo.pSwapchains = swapchains;
     presentInfo.pImageIndices = &imageIndex;
 
-    result = _presentQueue.presentKHR(&presentInfo);
+    result = _brain.presentQueue.presentKHR(&presentInfo);
 
-    _device.waitIdle();
+    _brain.device.waitIdle();
 
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || _swapChain->GetImageSize() != _application->DisplaySize())
     {
-        _swapChain->RecreateSwapChain(_application->DisplaySize(), _queueFamilyIndices);
+        _swapChain->RecreateSwapChain(_application->DisplaySize(), _brain.queueFamilyIndices);
     }
     else
     {
@@ -219,303 +189,68 @@ void Engine::Run()
     _performanceTracker.Update();
 }
 
-void Engine::Shutdown()
+Engine::~Engine()
 {
-    _shutdownImGui();
+    _application->ShutdownImGui();
     ImGui_ImplVulkan_Shutdown();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        _device.destroy(_inFlightFences[i]);
-        _device.destroy(_renderFinishedSemaphores[i]);
-        _device.destroy(_imageAvailableSemaphores[i]);
+        _brain.device.destroy(_inFlightFences[i]);
+        _brain.device.destroy(_renderFinishedSemaphores[i]);
+        _brain.device.destroy(_imageAvailableSemaphores[i]);
     }
-
-    if(_enableValidationLayers)
-        _instance.destroyDebugUtilsMessengerEXT(_debugMessenger, nullptr, _dldi);
 
     for(auto& mesh : _model.meshes)
     {
         for(auto& primitive : mesh.primitives)
         {
-            vmaDestroyBuffer(_vmaAllocator, primitive.vertexBuffer, primitive.vertexBufferAllocation);
-            vmaDestroyBuffer(_vmaAllocator, primitive.indexBuffer, primitive.indexBufferAllocation);
+            vmaDestroyBuffer(_brain.vmaAllocator, primitive.vertexBuffer, primitive.vertexBufferAllocation);
+            vmaDestroyBuffer(_brain.vmaAllocator, primitive.indexBuffer, primitive.indexBufferAllocation);
         }
     }
     for(auto& texture : _model.textures)
     {
-        _device.destroy(texture->imageView);
-        vmaDestroyImage(_vmaAllocator, texture->image, texture->imageAllocation);
+        _brain.device.destroy(texture->imageView);
+        vmaDestroyImage(_brain.vmaAllocator, texture->image, texture->imageAllocation);
     }
     for(auto& material : _model.materials)
     {
-        vmaDestroyBuffer(_vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
+        vmaDestroyBuffer(_brain.vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
     }
 
-    vmaDestroyBuffer(_vmaAllocator, _defaultMaterial.materialUniformBuffer, _defaultMaterial.materialUniformAllocation);
+    vmaDestroyBuffer(_brain.vmaAllocator, _defaultMaterial.materialUniformBuffer, _defaultMaterial.materialUniformAllocation);
     for(auto& texture : _defaultMaterial.textures)
     {
-        vmaDestroyImage(_vmaAllocator, texture->image, texture->imageAllocation);
-        _device.destroy(texture->imageView);
+        vmaDestroyImage(_brain.vmaAllocator, texture->image, texture->imageAllocation);
+        _brain.device.destroy(texture->imageView);
     }
+    _brain.device.destroy(_sampler);
 
     _swapChain.reset();
 
-    _device.destroy(_descriptorPool);
-
-    _device.destroy(_commandPool);
-
-    _device.destroy(_sampler);
-
-    _device.destroy(_geometryPipeline);
-    _device.destroy(_geometryPipelineLayout);
-    _device.destroy(_lightingPipeline);
-    _device.destroy(_lightingPipelineLayout);
+    _brain.device.destroy(_geometryPipeline);
+    _brain.device.destroy(_geometryPipelineLayout);
+    _brain.device.destroy(_lightingPipeline);
+    _brain.device.destroy(_lightingPipelineLayout);
 
     for(size_t i = 0; i < _frameData.size(); ++i)
     {
-        vmaUnmapMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation);
-        vmaDestroyBuffer(_vmaAllocator, _frameData[i].uniformBuffer, _frameData[i].uniformBufferAllocation);
+        vmaUnmapMemory(_brain.vmaAllocator, _frameData[i].uniformBufferAllocation);
+        vmaDestroyBuffer(_brain.vmaAllocator, _frameData[i].uniformBuffer, _frameData[i].uniformBufferAllocation);
 
-        vmaDestroyImage(_vmaAllocator, _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation);
+        vmaDestroyImage(_brain.vmaAllocator, _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation);
         for(size_t j = 0; j < _frameData[i].gBufferViews.size(); ++j)
         {
-            _device.destroy(_frameData[i].gBufferViews[j]);
+            _brain.device.destroy(_frameData[i].gBufferViews[j]);
         }
     }
 
-    _device.destroy(_geometryDescriptorSetLayout);
-    _device.destroy(_lightingDescriptorSetLayout);
-    _device.destroy(_materialDescriptorSetLayout);
-
-    vmaDestroyAllocator(_vmaAllocator);
-
-    _instance.destroy(_surface);
-    _device.destroy();
-    _instance.destroy();
-}
-
-void Engine::CreateInstance(const InitInfo &initInfo)
-{
-    CheckValidationLayerSupport();
-    if(_enableValidationLayers && !CheckValidationLayerSupport())
-        throw std::runtime_error("Validation layers requested, but not supported!");
-
-    vk::ApplicationInfo appInfo{};
-    appInfo.pApplicationName = "";
-    appInfo.applicationVersion = vk::makeApiVersion(0, 0, 0, 0);
-    appInfo.engineVersion = vk::makeApiVersion(0, 1, 0, 0);
-    appInfo.apiVersion = vk::makeApiVersion(0, 1, 1, 0);
-    appInfo.pEngineName = "No engine";
-
-    auto extensions = GetRequiredExtensions(initInfo);
-    vk::InstanceCreateInfo createInfo{
-            vk::InstanceCreateFlags{},
-            &appInfo,
-            0, nullptr,                                                 // Validation layers.
-            static_cast<uint32_t>(extensions.size()), extensions.data() // Extensions.
-    };
-
-    vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
-    if(_enableValidationLayers)
-    {
-        createInfo.enabledLayerCount = _validationLayers.size();
-        createInfo.ppEnabledLayerNames = _validationLayers.data();
-
-        util::PopulateDebugMessengerCreateInfo(debugCreateInfo);
-        createInfo.pNext = &debugCreateInfo;
-    } else
-    {
-        createInfo.enabledLayerCount = 0;
-        createInfo.pNext = nullptr;
-    }
-
-    util::VK_ASSERT(vk::createInstance(&createInfo, nullptr, &_instance), "Failed to create vk instance!");
-}
-
-bool Engine::CheckValidationLayerSupport()
-{
-    std::vector<vk::LayerProperties> availableLayers = vk::enumerateInstanceLayerProperties();
-    bool result = std::all_of(_validationLayers.begin(), _validationLayers.end(), [&availableLayers](const auto &layerName)
-    {
-        const auto it = std::find_if(availableLayers.begin(), availableLayers.end(), [&layerName](const auto &layer)
-        { return strcmp(layerName, layer.layerName) == 0; });
-
-        return it != availableLayers.end();
-    });
-
-    return result;
-}
-
-std::vector<const char *> Engine::GetRequiredExtensions(const InitInfo &initInfo)
-{
-    std::vector<const char *> extensions(initInfo.extensions, initInfo.extensions + initInfo.extensionCount);
-    if(_enableValidationLayers)
-        extensions.emplace_back(vk::EXTDebugUtilsExtensionName);
-
-#if LINUX
-    extensions.emplace_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
-#endif
-
-    return extensions;
-}
-
-void Engine::SetupDebugMessenger()
-{
-    if(!_enableValidationLayers)
-        return;
-
-    vk::DebugUtilsMessengerCreateInfoEXT createInfo{};
-    util::PopulateDebugMessengerCreateInfo(createInfo);
-    createInfo.pUserData = nullptr;
-
-    util::VK_ASSERT(_instance.createDebugUtilsMessengerEXT( &createInfo, nullptr, &_debugMessenger, _dldi),
-                    "Failed to create debug messenger!");
-}
-
-void Engine::PickPhysicalDevice()
-{
-    std::vector<vk::PhysicalDevice> devices = _instance.enumeratePhysicalDevices();
-    if(devices.empty())
-        throw std::runtime_error("No GPU's with Vulkan support available!");
-
-    std::multimap<int, vk::PhysicalDevice> candidates{};
-
-    for(const auto &device: devices)
-    {
-        uint32_t score = RateDeviceSuitability(device);
-        if(score > 0)
-            candidates.emplace(score, device);
-    }
-    if(candidates.empty())
-        throw std::runtime_error("Failed finding suitable device!");
-
-    _physicalDevice = candidates.rbegin()->second;
-}
-
-uint32_t Engine::RateDeviceSuitability(const vk::PhysicalDevice &device)
-{
-    vk::PhysicalDeviceProperties deviceProperties;
-    vk::PhysicalDeviceFeatures deviceFeatures;
-    device.getProperties(&deviceProperties);
-    device.getFeatures(&deviceFeatures);
-
-    QueueFamilyIndices familyIndices = FindQueueFamilies(device);
-
-    uint32_t score{ 0 };
-
-    // Failed if geometry shader is not supported.
-    if(!deviceFeatures.geometryShader)
-        return 0;
-
-    // Failed if graphics family queue is not supported.
-    if(!familyIndices.IsComplete())
-        return 0;
-
-    // Failed if no extensions are supported.
-    if(!ExtensionsSupported(device))
-        return 0;
-
-    // Check support for swap chain.
-    SwapChain::SupportDetails swapChainSupportDetails = SwapChain::QuerySupport(device, _surface);
-    bool swapChainUnsupported = swapChainSupportDetails.formats.empty() || swapChainSupportDetails.presentModes.empty();
-    if(swapChainUnsupported)
-        return 0;
-
-    // Favor discrete GPUs above all else.
-    if(deviceProperties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
-        score += 50000;
-
-    // Slightly favor integrated GPUs.
-    if(deviceProperties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu)
-        score += 30000;
-
-    score += deviceProperties.limits.maxImageDimension2D;
-
-    return score;
-}
-
-bool Engine::ExtensionsSupported(const vk::PhysicalDevice &device)
-{
-    std::vector<vk::ExtensionProperties> availableExtensions = device.enumerateDeviceExtensionProperties();
-    std::set<std::string> requiredExtensions{ _deviceExtensions.begin(), _deviceExtensions.end() };
-    for(const auto &extension: availableExtensions)
-        requiredExtensions.erase(extension.extensionName);
-
-    return requiredExtensions.empty();
-}
-
-QueueFamilyIndices Engine::FindQueueFamilies(vk::PhysicalDevice const &device)
-{
-    QueueFamilyIndices indices{};
-
-    uint32_t queueFamilyCount{ 0 };
-    device.getQueueFamilyProperties(&queueFamilyCount, nullptr);
-
-    std::vector <vk::QueueFamilyProperties> queueFamilies(queueFamilyCount);
-    device.getQueueFamilyProperties(&queueFamilyCount, queueFamilies.data());
-
-    for(size_t i = 0; i < queueFamilies.size(); ++i)
-    {
-        if(queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
-            indices.graphicsFamily = i;
-
-        if(!indices.presentFamily.has_value())
-        {
-            vk::Bool32 supported;
-            util::VK_ASSERT(device.getSurfaceSupportKHR(i, _surface, &supported),
-                            "Failed querying surface support on physical device!");
-            if(supported)
-                indices.presentFamily = i;
-        }
-
-        if(indices.IsComplete())
-            break;
-    }
-
-    return indices;
-}
-
-void Engine::CreateDevice()
-{
-    _queueFamilyIndices = FindQueueFamilies(_physicalDevice);
-    vk::PhysicalDeviceFeatures deviceFeatures;
-    _physicalDevice.getFeatures(&deviceFeatures);
-
-    std::vector <vk::DeviceQueueCreateInfo> queueCreateInfos{};
-    std::set <uint32_t> uniqueQueueFamilies = { _queueFamilyIndices.graphicsFamily.value(), _queueFamilyIndices.presentFamily.value() };
-    float queuePriority{ 1.0f };
-
-    for(uint32_t familyQueueIndex: uniqueQueueFamilies)
-        queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags{}, familyQueueIndex, 1, &queuePriority);
-
-    vk::PhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeaturesKhr{};
-    dynamicRenderingFeaturesKhr.dynamicRendering = true;
-
-    vk::DeviceCreateInfo createInfo{};
-    createInfo.pNext = &dynamicRenderingFeaturesKhr;
-    createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-    createInfo.pQueueCreateInfos = queueCreateInfos.data();
-    createInfo.pEnabledFeatures = &deviceFeatures;
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(_deviceExtensions.size());
-    createInfo.ppEnabledExtensionNames = _deviceExtensions.data();
-
-    if(_enableValidationLayers)
-    {
-        createInfo.enabledLayerCount = static_cast<uint32_t>(_validationLayers.size());
-        createInfo.ppEnabledLayerNames = _validationLayers.data();
-    }
-    else
-    {
-        createInfo.enabledLayerCount = 0;
-    }
-
-    util::VK_ASSERT(_physicalDevice.createDevice(&createInfo, nullptr, &_device), "Failed creating a logical device!");
-
-    _device.getQueue(_queueFamilyIndices.graphicsFamily.value(), 0, &_graphicsQueue);
-    _device.getQueue(_queueFamilyIndices.presentFamily.value(), 0, &_presentQueue);
+    _brain.device.destroy(_geometryDescriptorSetLayout);
+    _brain.device.destroy(_lightingDescriptorSetLayout);
+    _brain.device.destroy(_materialDescriptorSetLayout);
 }
 
 void Engine::CreateGeometryPipeline()
@@ -527,14 +262,14 @@ void Engine::CreateGeometryPipeline()
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
     pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-    util::VK_ASSERT(_device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_geometryPipelineLayout),
+    util::VK_ASSERT(_brain.device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_geometryPipelineLayout),
                     "Failed creating geometry pipeline layout!");
 
     auto vertByteCode = shader::ReadFile("shaders/geom-v.spv");
     auto fragByteCode = shader::ReadFile("shaders/geom-f.spv");
 
-    vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _device);
-    vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _device);
+    vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _brain.device);
+    vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _brain.device);
 
     vk::PipelineShaderStageCreateInfo vertShaderStageCreateInfo{};
     vertShaderStageCreateInfo.stage = vk::ShaderStageFlagBits::eVertex;
@@ -648,12 +383,12 @@ void Engine::CreateGeometryPipeline()
     geometryPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
     geometryPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
 
-    auto result = _device.createGraphicsPipeline(nullptr, geometryPipelineCreateInfo, nullptr);
+    auto result = _brain.device.createGraphicsPipeline(nullptr, geometryPipelineCreateInfo, nullptr);
     util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
     _geometryPipeline = result.value;
 
-    _device.destroy(vertModule);
-    _device.destroy(fragModule);
+    _brain.device.destroy(vertModule);
+    _brain.device.destroy(fragModule);
 }
 
 void Engine::CreateLightingPipeline()
@@ -664,14 +399,14 @@ void Engine::CreateLightingPipeline()
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
     pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-    util::VK_ASSERT(_device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_lightingPipelineLayout),
+    util::VK_ASSERT(_brain.device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_lightingPipelineLayout),
                     "Failed creating geometry pipeline layout!");
 
     auto vertByteCode = shader::ReadFile("shaders/lighting-v.spv");
     auto fragByteCode = shader::ReadFile("shaders/lighting-f.spv");
 
-    vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _device);
-    vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _device);
+    vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _brain.device);
+    vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _brain.device);
 
     vk::PipelineShaderStageCreateInfo vertShaderStageCreateInfo{};
     vertShaderStageCreateInfo.stage = vk::ShaderStageFlagBits::eVertex;
@@ -768,31 +503,22 @@ void Engine::CreateLightingPipeline()
     lightingPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
     lightingPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
 
-    auto result = _device.createGraphicsPipeline(nullptr, lightingPipelineCreateInfo, nullptr);
+    auto result = _brain.device.createGraphicsPipeline(nullptr, lightingPipelineCreateInfo, nullptr);
     util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
     _lightingPipeline = result.value;
 
-    _device.destroy(vertModule);
-    _device.destroy(fragModule);
-}
-
-void Engine::CreateCommandPool()
-{
-    vk::CommandPoolCreateInfo commandPoolCreateInfo{};
-    commandPoolCreateInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
-    commandPoolCreateInfo.queueFamilyIndex = _queueFamilyIndices.graphicsFamily.value();
-
-    util::VK_ASSERT(_device.createCommandPool(&commandPoolCreateInfo, nullptr, &_commandPool), "Failed creating command pool!");
+    _brain.device.destroy(vertModule);
+    _brain.device.destroy(fragModule);
 }
 
 void Engine::CreateCommandBuffers()
 {
     vk::CommandBufferAllocateInfo commandBufferAllocateInfo{};
-    commandBufferAllocateInfo.commandPool = _commandPool;
+    commandBufferAllocateInfo.commandPool = _brain.commandPool;
     commandBufferAllocateInfo.level = vk::CommandBufferLevel::ePrimary;
     commandBufferAllocateInfo.commandBufferCount = _commandBuffers.size();
 
-    util::VK_ASSERT(_device.allocateCommandBuffers(&commandBufferAllocateInfo, _commandBuffers.data()),
+    util::VK_ASSERT(_brain.device.allocateCommandBuffers(&commandBufferAllocateInfo, _commandBuffers.data()),
                     "Failed allocating command buffer!");
 }
 
@@ -840,9 +566,9 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     renderingInfo.pDepthAttachment = &depthAttachmentInfo;
     renderingInfo.pStencilAttachment = util::HasStencilComponent(_swapChain->GetDepthFormat()) ? &stencilAttachmentInfo : nullptr;
 
-    util::BeginLabel(commandBuffer, "Geometry pass", glm::vec3{ 6.0f, 214.0f, 160.0f } / 255.0f, _dldi);
+    util::BeginLabel(commandBuffer, "Geometry pass", glm::vec3{ 6.0f, 214.0f, 160.0f } / 255.0f, _brain.dldi);
 
-    commandBuffer.beginRenderingKHR(&renderingInfo, _dldi);
+    commandBuffer.beginRenderingKHR(&renderingInfo, _brain.dldi);
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _geometryPipeline);
 
@@ -871,9 +597,9 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
         }
     }
 
-    commandBuffer.endRenderingKHR(_dldi);
+    commandBuffer.endRenderingKHR(_brain.dldi);
 
-    util::EndLabel(commandBuffer, _dldi);
+    util::EndLabel(commandBuffer, _brain.dldi);
 
 
     util::TransitionImageLayout(commandBuffer, _frameData[_currentFrame].gBuffersImageArray,
@@ -896,8 +622,8 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     renderingInfo.pDepthAttachment = nullptr;
     renderingInfo.pStencilAttachment = nullptr;
 
-    util::BeginLabel(commandBuffer, "Lighting pass", glm::vec3{ 255.0f, 209.0f, 102.0f } / 255.0f, _dldi);
-    commandBuffer.beginRenderingKHR(&renderingInfo, _dldi);
+    util::BeginLabel(commandBuffer, "Lighting pass", glm::vec3{ 255.0f, 209.0f, 102.0f } / 255.0f, _brain.dldi);
+    commandBuffer.beginRenderingKHR(&renderingInfo, _brain.dldi);
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _lightingPipeline);
 
@@ -908,8 +634,8 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
 
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
 
-    commandBuffer.endRenderingKHR(_dldi);
-    util::EndLabel(commandBuffer, _dldi);
+    commandBuffer.endRenderingKHR(_brain.dldi);
+    util::EndLabel(commandBuffer, _brain.dldi);
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
 
@@ -925,9 +651,9 @@ void Engine::CreateSyncObjects()
     std::string errorMsg{ "Failed creating sync object!" };
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        util::VK_ASSERT(_device.createSemaphore(&semaphoreCreateInfo, nullptr, &_imageAvailableSemaphores[i]), errorMsg);
-        util::VK_ASSERT(_device.createSemaphore(&semaphoreCreateInfo, nullptr, &_renderFinishedSemaphores[i]), errorMsg);
-        util::VK_ASSERT(_device.createFence(&fenceCreateInfo, nullptr, &_inFlightFences[i]), errorMsg);
+        util::VK_ASSERT(_brain.device.createSemaphore(&semaphoreCreateInfo, nullptr, &_imageAvailableSemaphores[i]), errorMsg);
+        util::VK_ASSERT(_brain.device.createSemaphore(&semaphoreCreateInfo, nullptr, &_renderFinishedSemaphores[i]), errorMsg);
+        util::VK_ASSERT(_brain.device.createFence(&fenceCreateInfo, nullptr, &_inFlightFences[i]), errorMsg);
     }
 }
 
@@ -938,15 +664,15 @@ void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::B
     bufferInfo.usage = usage;
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
     bufferInfo.queueFamilyIndexCount = 1;
-    bufferInfo.pQueueFamilyIndices = &_queueFamilyIndices.graphicsFamily.value();
+    bufferInfo.pQueueFamilyIndices = &_brain.queueFamilyIndices.graphicsFamily.value();
 
     VmaAllocationCreateInfo allocationInfo{};
     allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
     if(mappable)
         allocationInfo.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
-    util::VK_ASSERT(vmaCreateBuffer(_vmaAllocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo), &allocationInfo, reinterpret_cast<VkBuffer*>(&buffer), &allocation, nullptr), "Failed creating buffer!");
-    vmaSetAllocationName(_vmaAllocator, allocation, name.data());
+    util::VK_ASSERT(vmaCreateBuffer(_brain.vmaAllocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo), &allocationInfo, reinterpret_cast<VkBuffer*>(&buffer), &allocation, nullptr), "Failed creating buffer!");
+    vmaSetAllocationName(_brain.vmaAllocator, allocation, name.data());
 }
 
 template <typename T>
@@ -958,18 +684,18 @@ void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, Vm
     VmaAllocation stagingBufferAllocation;
     CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Staging buffer");
 
-    vmaCopyMemoryToAllocation(_vmaAllocator, vec.data(), stagingBufferAllocation, 0, bufferSize);
+    vmaCopyMemoryToAllocation(_brain.vmaAllocator, vec.data(), stagingBufferAllocation, 0, bufferSize);
 
     CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation, name.data());
 
     CopyBuffer(stagingBuffer, buffer, bufferSize);
-    _device.destroy(stagingBuffer, nullptr);
-    vmaFreeMemory(_vmaAllocator, stagingBufferAllocation);
+    _brain.device.destroy(stagingBuffer, nullptr);
+    vmaFreeMemory(_brain.vmaAllocator, stagingBufferAllocation);
 }
 
 void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const
 {
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
+    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
 
     vk::BufferCopy copyRegion{};
     copyRegion.srcOffset = 0;
@@ -977,7 +703,7 @@ void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSi
     copyRegion.size = size;
     commandBuffer.copyBuffer(srcBuffer, dstBuffer, 1, &copyRegion);
 
-    util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
+    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, commandBuffer, _brain.commandPool);
 }
 
 void Engine::CreateUniformBuffers()
@@ -991,7 +717,7 @@ void Engine::CreateUniformBuffers()
                      _frameData[i].uniformBuffer, true, _frameData[i].uniformBufferAllocation,
                      "Uniform buffer");
 
-        util::VK_ASSERT(vmaMapMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation, &_frameData[i].uniformBufferMapped), "Failed mapping memory for UBO!");
+        util::VK_ASSERT(vmaMapMemory(_brain.vmaAllocator, _frameData[i].uniformBufferAllocation, &_frameData[i].uniformBufferMapped), "Failed mapping memory for UBO!");
     }
 }
 
@@ -1028,7 +754,7 @@ void Engine::CreateDescriptorSetLayout()
         createInfo.bindingCount = bindings.size();
         createInfo.pBindings = bindings.data();
 
-        util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_geometryDescriptorSetLayout),
+        util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_geometryDescriptorSetLayout),
                         "Failed creating geometry descriptor set layout!");
     }
 
@@ -1057,7 +783,7 @@ void Engine::CreateDescriptorSetLayout()
         createInfo.bindingCount = bindings.size();
         createInfo.pBindings = bindings.data();
 
-        util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_lightingDescriptorSetLayout),
+        util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_lightingDescriptorSetLayout),
                         "Failed creating lighting descriptor set layout!");
     }
     // Material
@@ -1066,33 +792,9 @@ void Engine::CreateDescriptorSetLayout()
         vk::DescriptorSetLayoutCreateInfo createInfo{};
         createInfo.bindingCount = layoutBindings.size();
         createInfo.pBindings = layoutBindings.data();
-        util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_materialDescriptorSetLayout),
+        util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_materialDescriptorSetLayout),
                         "Failed creating material descriptor set layout!");
     }
-}
-
-void Engine::CreateDescriptorPool()
-{
-    std::vector<vk::DescriptorPoolSize> poolSizes = {
-            { vk::DescriptorType::eSampler,              1000 },
-            { vk::DescriptorType::eCombinedImageSampler, 1000 },
-            { vk::DescriptorType::eSampledImage,         1000 },
-            { vk::DescriptorType::eStorageImage,         1000 },
-            { vk::DescriptorType::eUniformTexelBuffer,   1000 },
-            { vk::DescriptorType::eStorageTexelBuffer,   1000 },
-            { vk::DescriptorType::eUniformBuffer,        1000 },
-            { vk::DescriptorType::eStorageBuffer,        1000 },
-            { vk::DescriptorType::eUniformBufferDynamic, 1000 },
-            { vk::DescriptorType::eStorageBufferDynamic, 1000 },
-            { vk::DescriptorType::eInputAttachment,      1000 }
-    };
-
-    vk::DescriptorPoolCreateInfo createInfo{};
-    createInfo.poolSizeCount = poolSizes.size();
-    createInfo.pPoolSizes = poolSizes.data();
-    createInfo.maxSets = 200;
-    createInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-    util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }
 
 void Engine::CreateDescriptorSets()
@@ -1102,13 +804,13 @@ void Engine::CreateDescriptorSets()
         std::for_each(layouts.begin(), layouts.end(), [this](auto& l)
         { l = _geometryDescriptorSetLayout; });
         vk::DescriptorSetAllocateInfo allocateInfo{};
-        allocateInfo.descriptorPool = _descriptorPool;
+        allocateInfo.descriptorPool = _brain.descriptorPool;
         allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
         allocateInfo.pSetLayouts = layouts.data();
 
         std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets;
 
-        util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
+        util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
                         "Failed allocating descriptor sets!");
         for (size_t i = 0; i < descriptorSets.size(); ++i)
             _frameData[i].geometryDescriptorSet = descriptorSets[i];
@@ -1117,13 +819,13 @@ void Engine::CreateDescriptorSets()
         std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
         std::for_each(layouts.begin(), layouts.end(), [this](auto& l) { l = _lightingDescriptorSetLayout; });
         vk::DescriptorSetAllocateInfo allocateInfo{};
-        allocateInfo.descriptorPool = _descriptorPool;
+        allocateInfo.descriptorPool = _brain.descriptorPool;
         allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
         allocateInfo.pSetLayouts = layouts.data();
 
         std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets;
 
-        util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
+        util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
                         "Failed allocating descriptor sets!");
         for (size_t i = 0; i < descriptorSets.size(); ++i)
             _frameData[i].lightingDescriptorSet = descriptorSets[i];
@@ -1145,26 +847,26 @@ void Engine::CreateTextureImage(const Texture& texture, TextureHandle& textureHa
 
     CreateBuffer(imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Texture staging buffer");
 
-    vmaCopyMemoryToAllocation(_vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
+    vmaCopyMemoryToAllocation(_brain.vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
 
-    util::CreateImage(_vmaAllocator, texture.width, texture.height, format,
+    util::CreateImage(_brain.vmaAllocator, texture.width, texture.height, format,
                       vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
                       textureHandle.image, textureHandle.imageAllocation, "Texture image");
 
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
+    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
     util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-    util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
+    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, commandBuffer, _brain.commandPool);
 
     CopyBufferToImage(stagingBuffer, textureHandle.image, texture.width, texture.height);
 
-    commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
+    commandBuffer = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
     util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
-    util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
+    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, commandBuffer, _brain.commandPool);
 
-    _device.destroy(stagingBuffer, nullptr);
-    vmaFreeMemory(_vmaAllocator, stagingBufferAllocation);
+    _brain.device.destroy(stagingBuffer, nullptr);
+    vmaFreeMemory(_brain.vmaAllocator, stagingBufferAllocation);
 
-    textureHandle.imageView = util::CreateImageView(_device, textureHandle.image, texture.GetFormat(), vk::ImageAspectFlagBits::eColor);
+    textureHandle.imageView = util::CreateImageView(_brain.device, textureHandle.image, texture.GetFormat(), vk::ImageAspectFlagBits::eColor);
 }
 
 void Engine::CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height)
@@ -1180,17 +882,17 @@ void Engine::CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t widt
     region.imageOffset = vk::Offset3D{ 0, 0, 0 };
     region.imageExtent = vk::Extent3D{ width, height, 1 };
 
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
+    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
 
     commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, 1, &region);
 
-    util::EndSingleTimeCommands(_device, _graphicsQueue, commandBuffer, _commandPool);
+    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, commandBuffer, _brain.commandPool);
 }
 
 void Engine::CreateTextureSampler()
 {
     vk::PhysicalDeviceProperties properties{};
-    _physicalDevice.getProperties(&properties);
+    _brain.physicalDevice.getProperties(&properties);
 
     vk::SamplerCreateInfo createInfo{};
     createInfo.magFilter = vk::Filter::eLinear;
@@ -1209,7 +911,7 @@ void Engine::CreateTextureSampler()
     createInfo.minLod = 0.0f;
     createInfo.maxLod = 0.0f;
 
-    util::VK_ASSERT(_device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
+    util::VK_ASSERT(_brain.device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
 }
 
 void Engine::UpdateGeometryDescriptorSet(uint32_t frameIndex)
@@ -1229,7 +931,7 @@ void Engine::UpdateGeometryDescriptorSet(uint32_t frameIndex)
     bufferWrite.descriptorCount = 1;
     bufferWrite.pBufferInfo = &bufferInfo;
 
-    _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+    _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }
 
 void Engine::UpdateLightingDescriptorSet(uint32_t frameIndex)
@@ -1262,7 +964,7 @@ void Engine::UpdateLightingDescriptorSet(uint32_t frameIndex)
         descriptorWrites[i].pImageInfo = &imageInfo[i - 1];
     }
 
-    _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+    _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }
 
 
@@ -1343,26 +1045,26 @@ void Engine::InitializeDeferredRTs()
     {
         uint32_t width = _swapChain->GetImageSize().x;
         uint32_t height = _swapChain->GetImageSize().y;
-        util::CreateImage(_vmaAllocator, width, height, format,
+        util::CreateImage(_brain.vmaAllocator, width, height, format,
                           vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
                           _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation, "GBuffer array", FrameData::DEFERRED_ATTACHMENT_COUNT);
-        util::NameObject(_frameData[i].gBuffersImageArray, "[IMAGE] GBuffer Array", _device, _dldi);
+        util::NameObject(_frameData[i].gBuffersImageArray, "[IMAGE] GBuffer Array", _brain.device, _brain.dldi);
 
         for(size_t j = 0; j < FrameData::DEFERRED_ATTACHMENT_COUNT; ++j)
         {
-            _frameData[i].gBufferViews[j] = util::CreateImageView(_device, _frameData[i].gBuffersImageArray, format, vk::ImageAspectFlagBits::eColor, j);
+            _frameData[i].gBufferViews[j] = util::CreateImageView(_brain.device, _frameData[i].gBuffersImageArray, format, vk::ImageAspectFlagBits::eColor, j);
             std::string name = "[VIEW] GBuffer ";
             if(i == 0) name = "RGB: Albedo A: Metallic";
             else if(i == 1) name = "RGB: Normal A: Roughness";
             else if(i == 2) name = "RGB: Emissive A: AO";
             else if(i == 3) name = "RGB: Position A: Unused";
 
-            util::NameObject(_frameData[i].gBufferViews[j], name, _device, _dldi);
+            util::NameObject(_frameData[i].gBufferViews[j], name, _brain.device, _brain.dldi);
         }
 
-        vk::CommandBuffer cb = util::BeginSingleTimeCommands(_device, _commandPool);
+        vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
         util::TransitionImageLayout(cb, _frameData[i].gBuffersImageArray, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, FrameData::DEFERRED_ATTACHMENT_COUNT);
-        util::EndSingleTimeCommands(_device, _graphicsQueue, cb, _commandPool);
+        util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
     }
 }
 
@@ -1374,17 +1076,17 @@ MaterialHandle Engine::CreateMaterial(const std::array<std::shared_ptr<TextureHa
     CreateBuffer(sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation, "Material uniform buffer");
 
     void* uniformPtr;
-    util::VK_ASSERT(vmaMapMemory(_vmaAllocator, materialHandle.materialUniformAllocation, &uniformPtr), "Failed mapping memory for material UBO!");
+    util::VK_ASSERT(vmaMapMemory(_brain.vmaAllocator, materialHandle.materialUniformAllocation, &uniformPtr), "Failed mapping memory for material UBO!");
     std::memcpy(uniformPtr, &info, sizeof(info));
-    vmaUnmapMemory(_vmaAllocator, materialHandle.materialUniformAllocation);
+    vmaUnmapMemory(_brain.vmaAllocator, materialHandle.materialUniformAllocation);
 
 
     vk::DescriptorSetAllocateInfo allocateInfo{};
-    allocateInfo.descriptorPool = _descriptorPool;
+    allocateInfo.descriptorPool = _brain.descriptorPool;
     allocateInfo.descriptorSetCount = 1;
     allocateInfo.pSetLayouts = &_materialDescriptorSetLayout;
 
-    util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, &materialHandle.descriptorSet),
+    util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, &materialHandle.descriptorSet),
                     "Failed allocating material descriptor set!");
 
     std::array<vk::DescriptorImageInfo, 6> imageInfos;
@@ -1420,7 +1122,7 @@ MaterialHandle Engine::CreateMaterial(const std::array<std::shared_ptr<TextureHa
     writes[imageInfos.size()].descriptorCount = 1;
     writes[imageInfos.size()].pBufferInfo = &uniformInfo;
 
-    _device.updateDescriptorSets(writes.size(), writes.data(), 0, nullptr);
+    _brain.device.updateDescriptorSets(writes.size(), writes.data(), 0, nullptr);
 
     return materialHandle;
 }
