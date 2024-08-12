@@ -10,11 +10,7 @@
 #include "gbuffers.hpp"
 #include "include.hpp"
 #include "pipelines/geometry_pipeline.hpp"
-
-struct FrameData
-{
-    vk::DescriptorSet lightingDescriptorSet;
-};
+#include "pipelines/lighting_pipeline.hpp"
 
 class Engine
 {
@@ -29,14 +25,11 @@ public:
 
 private:
     const VulkanBrain _brain;
-    vk::DescriptorSetLayout _lightingDescriptorSetLayout;
     vk::DescriptorSetLayout _materialDescriptorSetLayout;
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
 
     std::unique_ptr<GeometryPipeline> _geometryPipeline;
-
-    vk::PipelineLayout _lightingPipelineLayout;
-    vk::Pipeline _lightingPipeline;
+    std::unique_ptr<LightingPipeline> _lightingPipeline;
 
     ModelHandle _model;
     MaterialHandle _defaultMaterial;
@@ -45,7 +38,6 @@ private:
 
     std::unique_ptr<SwapChain> _swapChain;
     std::unique_ptr<GBuffers> _gBuffers;
-
 
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _imageAvailableSemaphores;
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _renderFinishedSemaphores;
@@ -57,19 +49,13 @@ private:
 
     PerformanceTracker _performanceTracker;
 
-    std::array<FrameData, MAX_FRAMES_IN_FLIGHT> _frameData;
-
     void CreateDescriptorSetLayout();
-    void CreateGeometryPipeline();
-    void CreateLightingPipeline();
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
     void CreateSyncObjects();
     void CreateTextureImage(const Texture& texture, TextureHandle& textureHandle, vk::Format format);
     void CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
     void CreateTextureSampler();
-    void CreateDescriptorSets();
-    void UpdateLightingDescriptorSet(uint32_t frameIndex);
     ModelHandle LoadModel(const Model& model);
 
     MaterialHandle CreateMaterial(const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info);

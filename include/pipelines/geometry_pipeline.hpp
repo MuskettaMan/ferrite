@@ -41,9 +41,9 @@ private:
     const VulkanBrain& _brain;
     const GBuffers& _gBuffers;
 
-    vk::DescriptorSetLayout _geometryDescriptorSetLayout;
-    vk::PipelineLayout _geometryPipelineLayout;
-    vk::Pipeline _geometryPipeline;
+    vk::DescriptorSetLayout _descriptorSetLayout;
+    vk::PipelineLayout _pipelineLayout;
+    vk::Pipeline _pipeline;
 
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> _frameData;
 };

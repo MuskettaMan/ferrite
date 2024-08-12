@@ -14,14 +14,14 @@ GeometryPipeline::GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBu
 
 GeometryPipeline::~GeometryPipeline()
 {
-    _brain.device.destroy(_geometryPipeline);
-    _brain.device.destroy(_geometryPipelineLayout);
+    _brain.device.destroy(_pipeline);
+    _brain.device.destroy(_pipelineLayout);
     for(size_t i = 0; i < _frameData.size(); ++i)
     {
         vmaUnmapMemory(_brain.vmaAllocator, _frameData[i].uniformBufferAllocation);
         vmaDestroyBuffer(_brain.vmaAllocator, _frameData[i].uniformBuffer, _frameData[i].uniformBufferAllocation);
     }
-    _brain.device.destroy(_geometryDescriptorSetLayout);
+    _brain.device.destroy(_descriptorSetLayout);
 }
 
 void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, const ModelHandle& model)
@@ -65,7 +65,7 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
 
     commandBuffer.beginRenderingKHR(&renderingInfo, _brain.dldi);
 
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _geometryPipeline);
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pipeline);
 
     commandBuffer.setViewport(0, 1, &_gBuffers.Viewport());
     commandBuffer.setScissor(0, 1, &_gBuffers.Scissor());
@@ -85,8 +85,8 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
             vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
             vk::DeviceSize offsets[] = { 0 };
 
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 0, nullptr);
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 1, 1, &material.descriptorSet, 0, nullptr);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 0, nullptr);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &material.descriptorSet, 0, nullptr);
 
             commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
             commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
@@ -103,13 +103,13 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
 void GeometryPipeline::CreatePipeline(vk::DescriptorSetLayout materialDescriptorSetLayout)
 {
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    std::array<vk::DescriptorSetLayout, 2> layouts = { _geometryDescriptorSetLayout, materialDescriptorSetLayout };
+    std::array<vk::DescriptorSetLayout, 2> layouts = {_descriptorSetLayout, materialDescriptorSetLayout };
     pipelineLayoutCreateInfo.setLayoutCount = layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
     pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-    util::VK_ASSERT(_brain.device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_geometryPipelineLayout),
+    util::VK_ASSERT(_brain.device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_pipelineLayout),
                     "Failed creating geometry pipeline layout!");
 
     auto vertByteCode = shader::ReadFile("shaders/geom-v.spv");
@@ -210,7 +210,7 @@ void GeometryPipeline::CreatePipeline(vk::DescriptorSetLayout materialDescriptor
     geometryPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
     geometryPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
     geometryPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
-    geometryPipelineCreateInfo.layout = _geometryPipelineLayout;
+    geometryPipelineCreateInfo.layout = _pipelineLayout;
     geometryPipelineCreateInfo.subpass = 0;
     geometryPipelineCreateInfo.basePipelineHandle = nullptr;
     geometryPipelineCreateInfo.basePipelineIndex = -1;
@@ -227,7 +227,7 @@ void GeometryPipeline::CreatePipeline(vk::DescriptorSetLayout materialDescriptor
 
     auto result = _brain.device.createGraphicsPipeline(nullptr, geometryPipelineCreateInfo, nullptr);
     util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
-    _geometryPipeline = result.value;
+    _pipeline = result.value;
 
     _brain.device.destroy(vertModule);
     _brain.device.destroy(fragModule);
@@ -248,7 +248,7 @@ void GeometryPipeline::CreateDescriptorSetLayout()
     createInfo.bindingCount = bindings.size();
     createInfo.pBindings = bindings.data();
 
-    util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_geometryDescriptorSetLayout),
+    util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_descriptorSetLayout),
                     "Failed creating geometry descriptor set layout!");
 }
 
@@ -256,7 +256,7 @@ void GeometryPipeline::CreateDescriptorSets()
 {
     std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
     std::for_each(layouts.begin(), layouts.end(), [this](auto& l)
-    { l = _geometryDescriptorSetLayout; });
+    { l = _descriptorSetLayout; });
     vk::DescriptorSetAllocateInfo allocateInfo{};
     allocateInfo.descriptorPool = _brain.descriptorPool;
     allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;

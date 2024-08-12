@@ -32,32 +32,22 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
     _application = std::move(application);
 
-    _swapChain = std::make_unique<SwapChain>(_brain);
-
-    _swapChain->CreateSwapChain(glm::uvec2{ initInfo.width, initInfo.height });
-
-
     CreateDescriptorSetLayout();
+
+    _swapChain = std::make_unique<SwapChain>(_brain, glm::uvec2{ initInfo.width, initInfo.height });
     _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
     _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout);
-
-    CreateGeometryPipeline();
-    CreateLightingPipeline();
+    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, *_swapChain);
 
     CreateTextureSampler();
-
     CreateCommandBuffers();
     CreateSyncObjects();
-
     CreateDefaultMaterial();
-
 
     ModelLoader modelLoader;
     Model model = modelLoader.Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
     //Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
     _model = LoadModel(model);
-
-    CreateDescriptorSets();
 
     vk::Format format = _swapChain->GetFormat();
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
@@ -212,132 +202,7 @@ Engine::~Engine()
 
     _swapChain.reset();
 
-    _brain.device.destroy(_lightingPipeline);
-    _brain.device.destroy(_lightingPipelineLayout);
-
-
-    _brain.device.destroy(_lightingDescriptorSetLayout);
     _brain.device.destroy(_materialDescriptorSetLayout);
-}
-
-void Engine::CreateGeometryPipeline()
-{
-
-}
-
-void Engine::CreateLightingPipeline()
-{
-    vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &_lightingDescriptorSetLayout;
-    pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
-    pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
-
-    util::VK_ASSERT(_brain.device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_lightingPipelineLayout),
-                    "Failed creating geometry pipeline layout!");
-
-    auto vertByteCode = shader::ReadFile("shaders/lighting-v.spv");
-    auto fragByteCode = shader::ReadFile("shaders/lighting-f.spv");
-
-    vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _brain.device);
-    vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _brain.device);
-
-    vk::PipelineShaderStageCreateInfo vertShaderStageCreateInfo{};
-    vertShaderStageCreateInfo.stage = vk::ShaderStageFlagBits::eVertex;
-    vertShaderStageCreateInfo.module = vertModule;
-    vertShaderStageCreateInfo.pName = "main";
-
-    vk::PipelineShaderStageCreateInfo fragShaderStageCreateInfo{};
-    fragShaderStageCreateInfo.stage = vk::ShaderStageFlagBits::eFragment;
-    fragShaderStageCreateInfo.module = fragModule;
-    fragShaderStageCreateInfo.pName = "main";
-
-    vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageCreateInfo, fragShaderStageCreateInfo };
-
-    vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo{};
-
-    vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo{};
-    inputAssemblyStateCreateInfo.topology = vk::PrimitiveTopology::eTriangleList;
-    inputAssemblyStateCreateInfo.primitiveRestartEnable = vk::False;
-
-    std::array<vk::DynamicState, 2> dynamicStates = {
-            vk::DynamicState::eViewport,
-            vk::DynamicState::eScissor,
-    };
-
-    vk::PipelineDynamicStateCreateInfo dynamicStateCreateInfo{};
-    dynamicStateCreateInfo.dynamicStateCount = dynamicStates.size();
-    dynamicStateCreateInfo.pDynamicStates = dynamicStates.data();
-
-    vk::PipelineViewportStateCreateInfo viewportStateCreateInfo{};
-    viewportStateCreateInfo.viewportCount = 1;
-    viewportStateCreateInfo.scissorCount = 1;
-
-    vk::PipelineRasterizationStateCreateInfo rasterizationStateCreateInfo{};
-    rasterizationStateCreateInfo.depthClampEnable = vk::False;
-    rasterizationStateCreateInfo.rasterizerDiscardEnable = vk::False;
-    rasterizationStateCreateInfo.polygonMode = vk::PolygonMode::eFill;
-    rasterizationStateCreateInfo.lineWidth = 1.0f;
-    rasterizationStateCreateInfo.cullMode = vk::CullModeFlagBits::eBack;
-    rasterizationStateCreateInfo.frontFace = vk::FrontFace::eClockwise;
-    rasterizationStateCreateInfo.depthBiasEnable = vk::False;
-    rasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
-    rasterizationStateCreateInfo.depthBiasClamp = 0.0f;
-    rasterizationStateCreateInfo.depthBiasSlopeFactor = 0.0f;
-
-    vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo{};
-    multisampleStateCreateInfo.sampleShadingEnable = vk::False;
-    multisampleStateCreateInfo.rasterizationSamples = vk::SampleCountFlagBits::e1;
-    multisampleStateCreateInfo.minSampleShading = 1.0f;
-    multisampleStateCreateInfo.pSampleMask = nullptr;
-    multisampleStateCreateInfo.alphaToCoverageEnable = vk::False;
-    multisampleStateCreateInfo.alphaToOneEnable = vk::False;
-
-    vk::PipelineColorBlendAttachmentState colorBlendAttachmentState{};
-    colorBlendAttachmentState.blendEnable = vk::False;
-    colorBlendAttachmentState.colorWriteMask =
-            vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
-            vk::ColorComponentFlagBits::eA;
-
-    vk::PipelineColorBlendStateCreateInfo colorBlendStateCreateInfo{};
-    colorBlendStateCreateInfo.logicOpEnable = vk::False;
-    colorBlendStateCreateInfo.attachmentCount = 1;
-    colorBlendStateCreateInfo.pAttachments = &colorBlendAttachmentState;
-
-    vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo{};
-    depthStencilStateCreateInfo.depthTestEnable = false;
-    depthStencilStateCreateInfo.depthWriteEnable = false;
-
-    vk::GraphicsPipelineCreateInfo lightingPipelineCreateInfo{};
-    lightingPipelineCreateInfo.stageCount = 2;
-    lightingPipelineCreateInfo.pStages = shaderStages;
-    lightingPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
-    lightingPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
-    lightingPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
-    lightingPipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
-    lightingPipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
-    lightingPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
-    lightingPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
-    lightingPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
-    lightingPipelineCreateInfo.layout = _lightingPipelineLayout;
-    lightingPipelineCreateInfo.subpass = 0;
-    lightingPipelineCreateInfo.basePipelineHandle = nullptr;
-    lightingPipelineCreateInfo.basePipelineIndex = -1;
-
-    vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
-    pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
-    vk::Format format = _swapChain->GetFormat();
-    pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
-
-    lightingPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
-    lightingPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
-
-    auto result = _brain.device.createGraphicsPipeline(nullptr, lightingPipelineCreateInfo, nullptr);
-    util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
-    _lightingPipeline = result.value;
-
-    _brain.device.destroy(vertModule);
-    _brain.device.destroy(fragModule);
 }
 
 void Engine::CreateCommandBuffers()
@@ -369,36 +234,10 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
                                 vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
-    vk::RenderingAttachmentInfoKHR finalColorAttachmentInfo{};
-    finalColorAttachmentInfo.imageView = _swapChain->GetImageView(swapChainImageIndex);
-    finalColorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
-    finalColorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
-    finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
-    finalColorAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
+    _lightingPipeline->RecordCommands(commandBuffer, _currentFrame, swapChainImageIndex);
 
-    vk::RenderingInfoKHR renderingInfo{};
-    renderingInfo.renderArea.extent = vk::Extent2D{ _gBuffers->Size().x, _gBuffers->Size().y };
-    renderingInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachments = &finalColorAttachmentInfo;
-    renderingInfo.layerCount = 1;
-    renderingInfo.pDepthAttachment = nullptr;
-    renderingInfo.pStencilAttachment = nullptr;
-
-    util::BeginLabel(commandBuffer, "Lighting pass", glm::vec3{ 255.0f, 209.0f, 102.0f } / 255.0f, _brain.dldi);
-    commandBuffer.beginRenderingKHR(&renderingInfo, _brain.dldi);
-
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _lightingPipeline);
-
-    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _lightingPipelineLayout, 0, 1, &_frameData[_currentFrame].lightingDescriptorSet, 0, nullptr);
-
-    // Fullscreen quad.
-    commandBuffer.draw(3, 1, 0, 0);
-
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
-
-    commandBuffer.endRenderingKHR(_brain.dldi);
-    util::EndLabel(commandBuffer, _brain.dldi);
+    // TODO: Figure this out.
+    //ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), _commandBuffers[_currentFrame]);
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
 
@@ -422,34 +261,6 @@ void Engine::CreateSyncObjects()
 
 void Engine::CreateDescriptorSetLayout()
 {
-    // Lighting
-    {
-        std::array<vk::DescriptorSetLayoutBinding, DEFERRED_ATTACHMENT_COUNT + 1> bindings{};
-
-        vk::DescriptorSetLayoutBinding& samplerLayoutBinding{bindings[0]};
-        samplerLayoutBinding.binding = 0;
-        samplerLayoutBinding.descriptorCount = 1;
-        samplerLayoutBinding.descriptorType = vk::DescriptorType::eSampler;
-        samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-        samplerLayoutBinding.pImmutableSamplers = nullptr;
-
-        for(size_t i = 1; i < bindings.size(); ++i)
-        {
-            vk::DescriptorSetLayoutBinding& binding{bindings[i]};
-            binding.binding = i;
-            binding.descriptorCount = 1;
-            binding.descriptorType = vk::DescriptorType::eSampledImage;
-            binding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-            binding.pImmutableSamplers = nullptr;
-        }
-
-        vk::DescriptorSetLayoutCreateInfo createInfo{};
-        createInfo.bindingCount = bindings.size();
-        createInfo.pBindings = bindings.data();
-
-        util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_lightingDescriptorSetLayout),
-                        "Failed creating lighting descriptor set layout!");
-    }
     // Material
     {
         auto layoutBindings = MaterialHandle::GetLayoutBindings();
@@ -458,30 +269,6 @@ void Engine::CreateDescriptorSetLayout()
         createInfo.pBindings = layoutBindings.data();
         util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_materialDescriptorSetLayout),
                         "Failed creating material descriptor set layout!");
-    }
-}
-
-void Engine::CreateDescriptorSets()
-{
-    {
-        std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
-        std::for_each(layouts.begin(), layouts.end(), [this](auto& l) { l = _lightingDescriptorSetLayout; });
-        vk::DescriptorSetAllocateInfo allocateInfo{};
-        allocateInfo.descriptorPool = _brain.descriptorPool;
-        allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-        allocateInfo.pSetLayouts = layouts.data();
-
-        std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets;
-
-        util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
-                        "Failed allocating descriptor sets!");
-        for (size_t i = 0; i < descriptorSets.size(); ++i)
-            _frameData[i].lightingDescriptorSet = descriptorSets[i];
-    }
-
-    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-    {
-        UpdateLightingDescriptorSet(i);
     }
 }
 
@@ -559,39 +346,6 @@ void Engine::CreateTextureSampler()
     createInfo.maxLod = 0.0f;
 
     util::VK_ASSERT(_brain.device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
-}
-
-void Engine::UpdateLightingDescriptorSet(uint32_t frameIndex)
-{
-    vk::DescriptorImageInfo samplerInfo{};
-    samplerInfo.sampler = _sampler;
-
-    std::array<vk::DescriptorImageInfo, DEFERRED_ATTACHMENT_COUNT> imageInfo{};
-    for(size_t i = 0; i < imageInfo.size(); ++i)
-    {
-        imageInfo[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        imageInfo[i].imageView = _gBuffers->GBufferView(frameIndex, i);
-    }
-
-    std::array<vk::WriteDescriptorSet, DEFERRED_ATTACHMENT_COUNT + 1> descriptorWrites{};
-    descriptorWrites[0].dstSet = _frameData[frameIndex].lightingDescriptorSet;
-    descriptorWrites[0].dstBinding = 0;
-    descriptorWrites[0].dstArrayElement = 0;
-    descriptorWrites[0].descriptorType = vk::DescriptorType::eSampler;
-    descriptorWrites[0].descriptorCount = 1;
-    descriptorWrites[0].pImageInfo = &samplerInfo;
-
-    for(size_t i = 1; i < descriptorWrites.size(); ++i)
-    {
-        descriptorWrites[i].dstSet = _frameData[frameIndex].lightingDescriptorSet;
-        descriptorWrites[i].dstBinding = i;
-        descriptorWrites[i].dstArrayElement = 0;
-        descriptorWrites[i].descriptorType = vk::DescriptorType::eSampledImage;
-        descriptorWrites[i].descriptorCount = 1;
-        descriptorWrites[i].pImageInfo = &imageInfo[i - 1];
-    }
-
-    _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }
 
 

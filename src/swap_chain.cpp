@@ -3,9 +3,10 @@
 #include "vulkan/vulkan.h"
 #include "engine.hpp"
 
-SwapChain::SwapChain(const VulkanBrain& brain) :
+SwapChain::SwapChain(const VulkanBrain& brain, const glm::uvec2& screenSize) :
     _brain(brain)
 {
+    CreateSwapChain(screenSize);
 }
 
 SwapChain::~SwapChain()

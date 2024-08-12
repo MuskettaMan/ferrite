@@ -17,12 +17,11 @@ public:
         std::vector<vk::PresentModeKHR> presentModes;
     };
 
-    SwapChain(const VulkanBrain& brain);
+    SwapChain(const VulkanBrain& brain, const glm::uvec2& screenSize);
     ~SwapChain();
     NON_MOVABLE(SwapChain);
     NON_COPYABLE(SwapChain);
 
-    void CreateSwapChain(const glm::uvec2& screenSize);
     void Resize(const glm::uvec2& screenSize);
     size_t GetImageCount() const { return _images.size(); };
     vk::SwapchainKHR GetSwapChain() const { return _swapChain; }
@@ -45,6 +44,7 @@ private:
     std::vector<vk::ImageView> _imageViews;
     vk::Format _format;
 
+    void CreateSwapChain(const glm::uvec2& screenSize);
     void CleanUpSwapChain();
     vk::SurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
     vk::PresentModeKHR ChoosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
