@@ -63,7 +63,8 @@ MeshPrimitive ModelLoader::ProcessPrimitive(const fastgltf::Primitive& gltfPrimi
     MeshPrimitive primitive{};
 
     primitive.topology = MapGltfTopology(gltfPrimitive.type);
-    primitive.materialIndex = gltfPrimitive.materialIndex.value_or(-1);
+    if(gltfPrimitive.materialIndex.has_value())
+        primitive.materialIndex = gltfPrimitive.materialIndex.value();
 
     bool verticesReserved = false;
     bool tangentFound = false;
@@ -151,12 +152,6 @@ Texture ModelLoader::ProcessImage(const fastgltf::Image& gltfImage, const fastgl
 {
     Texture texture{};
 
-    auto handleStbiData = [&](stbi_uc* data, uint32_t dataSize)
-    {
-        texture.data = std::vector<std::byte>(dataSize);
-        std::copy(texture.data.begin(), texture.data.end(), reinterpret_cast<std::byte*>(data));
-    };
-
     std::visit(fastgltf::visitor {
             [](auto& arg) {},
             [&](const fastgltf::sources::URI& filePath) {
@@ -168,7 +163,8 @@ Texture ModelLoader::ProcessImage(const fastgltf::Image& gltfImage, const fastgl
                 stbi_uc* data = stbi_load(path.c_str(), &width, &height, &nrChannels, 4);
                 if(!data) spdlog::error("Failed loading data from STBI at path: {}", path);
 
-                handleStbiData(data, width * height * 4);
+                texture.data = std::vector<std::byte>(width * height * 4);
+                std::memcpy(texture.data.data(), reinterpret_cast<std::byte*>(data), texture.data.size());
                 texture.width = width;
                 texture.height = height;
                 texture.numChannels = 4;
@@ -179,7 +175,8 @@ Texture ModelLoader::ProcessImage(const fastgltf::Image& gltfImage, const fastgl
                 int32_t width, height, nrChannels;
                 stbi_uc* data = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(vector.bytes.data()), static_cast<int32_t>(vector.bytes.size()), &width, &height, &nrChannels, 4);
 
-                handleStbiData(data, width * height * 4);
+                texture.data = std::vector<std::byte>(width * height * 4);
+                std::memcpy(texture.data.data(), reinterpret_cast<std::byte*>(data), texture.data.size());
                 texture.width = width;
                 texture.height = height;
                 texture.numChannels = 4;
@@ -218,11 +215,16 @@ Material ModelLoader::ProcessMaterial(const fastgltf::Material& gltfMaterial, co
 {
     Material material{};
 
-    material.albedoIndex = gltfMaterial.pbrData.baseColorTexture.has_value() ? gltfMaterial.pbrData.baseColorTexture.value().textureIndex : -1;
-    material.metallicRoughnessIndex = gltfMaterial.pbrData.metallicRoughnessTexture.has_value() ? gltfMaterial.pbrData.metallicRoughnessTexture.value().textureIndex : -1;
-    material.normalIndex = gltfMaterial.normalTexture.has_value() ? gltfMaterial.normalTexture.value().textureIndex : -1;
-    material.occlusionIndex = gltfMaterial.occlusionTexture.has_value() ? gltfMaterial.occlusionTexture.value().textureIndex : -1;
-    material.emissiveIndex = gltfMaterial.emissiveTexture.has_value() ? gltfMaterial.emissiveTexture.value().textureIndex : -1;
+    if(gltfMaterial.pbrData.baseColorTexture.has_value())
+        material.albedoIndex = MapTextureIndexToImageIndex(gltfMaterial.pbrData.baseColorTexture.value().textureIndex, gltf);
+    if(gltfMaterial.pbrData.metallicRoughnessTexture.has_value())
+        material.metallicRoughnessIndex = MapTextureIndexToImageIndex(gltfMaterial.pbrData.metallicRoughnessTexture.value().textureIndex, gltf);
+    if(gltfMaterial.normalTexture.has_value())
+        material.normalIndex = MapTextureIndexToImageIndex(gltfMaterial.normalTexture.value().textureIndex, gltf);
+    if(gltfMaterial.occlusionTexture.has_value())
+        material.occlusionIndex = MapTextureIndexToImageIndex(gltfMaterial.occlusionTexture.value().textureIndex, gltf);
+    if(gltfMaterial.emissiveTexture.has_value())
+        material.emissiveIndex = MapTextureIndexToImageIndex(gltfMaterial.emissiveTexture.value().textureIndex, gltf);
 
     material.albedoFactor = *reinterpret_cast<const glm::vec4*>(&gltfMaterial.pbrData.baseColorFactor);
     material.metallicFactor = gltfMaterial.pbrData.metallicFactor;
@@ -256,6 +258,11 @@ vk::IndexType ModelLoader::MapIndexType(fastgltf::ComponentType componentType)
     case fastgltf::ComponentType::UnsignedShort: return vk::IndexType::eUint16;
     default: throw std::runtime_error("Unsupported index component type!");
     }
+}
+
+uint32_t ModelLoader::MapTextureIndexToImageIndex(uint32_t textureIndex, const fastgltf::Asset& gltf)
+{
+    return gltf.textures[textureIndex].imageIndex.value();
 }
 
 void ModelLoader::CalculateTangents(MeshPrimitive& primitive)

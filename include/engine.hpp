@@ -85,6 +85,7 @@ private:
     vk::Pipeline _lightingPipeline;
 
     ModelHandle _model;
+    MaterialHandle _defaultMaterial;
 
     vk::Sampler _sampler;
 
@@ -164,4 +165,6 @@ private:
     ModelHandle LoadModel(const Model& model);
 
     void InitializeDeferredRTs();
+    MaterialHandle CreateMaterial(const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info);
+    void CreateDefaultMaterial();
 };

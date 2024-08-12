@@ -34,7 +34,7 @@ struct MeshPrimitive
     std::vector<std::byte> indices;
     std::vector<Vertex> vertices;
 
-    uint32_t materialIndex;
+    std::optional<uint32_t> materialIndex;
 };
 
 struct Mesh
@@ -55,24 +55,24 @@ struct Texture
 
 struct Material
 {
-    uint32_t albedoIndex;
+    std::optional<uint32_t> albedoIndex;
     glm::vec4 albedoFactor;
     uint32_t albedoUVChannel;
 
-    uint32_t metallicRoughnessIndex;
+    std::optional<uint32_t> metallicRoughnessIndex;
     float metallicFactor;
     float roughnessFactor;
-    uint32_t metallicRoughnessUVChannel;
+    std::optional<uint32_t> metallicRoughnessUVChannel;
 
-    uint32_t normalIndex;
+    std::optional<uint32_t> normalIndex;
     float normalScale;
     uint32_t normalUVChannel;
 
-    uint32_t occlusionIndex;
+    std::optional<uint32_t> occlusionIndex;
     float occlusionStrength;
     uint32_t occlusionUVChannel;
 
-    uint32_t emissiveIndex;
+    std::optional<uint32_t> emissiveIndex;
     glm::vec3 emissiveFactor;
     uint32_t emissiveUVChannel;
 };
@@ -96,23 +96,57 @@ struct TextureHandle
 
 struct MaterialHandle
 {
-    vk::DescriptorSet descriptorSet;
-    std::array<std::shared_ptr<TextureHandle>, 5> textures;
-
-    static std::array<vk::DescriptorSetLayoutBinding, 6> GetLayoutBindings()
+    struct MaterialInfo
     {
-        std::array<vk::DescriptorSetLayoutBinding, 6> bindings{};
+        alignas(16)
+        glm::vec4 albedoFactor{0.0f};
+
+        alignas(16)
+        float metallicFactor{0.0f};
+        float roughnessFactor{0.0f};
+        float normalScale{0.0f};
+        float occlusionStrength{0.0f};
+
+        alignas(16)
+        bool useAlbedoMap{false};
+        bool useMRMap{false};
+        bool useNormalMap{false};
+        bool useOcclusionMap{false};
+
+        alignas(16)
+        glm::vec3 emissiveFactor{0.0f};
+        bool useEmissiveMap{false};
+    };
+
+    const static uint32_t TEXTURE_COUNT = 5;
+
+    vk::DescriptorSet descriptorSet;
+    vk::Buffer materialUniformBuffer;
+    VmaAllocation materialUniformAllocation;
+
+
+    std::array<std::shared_ptr<TextureHandle>, TEXTURE_COUNT> textures;
+
+    static std::array<vk::DescriptorSetLayoutBinding, 7> GetLayoutBindings()
+    {
+        std::array<vk::DescriptorSetLayoutBinding, 7> bindings{};
         bindings[0].binding = 0;
         bindings[0].descriptorType = vk::DescriptorType::eSampler;
         bindings[0].descriptorCount = 1;
         bindings[0].stageFlags = vk::ShaderStageFlagBits::eFragment;
-        for(size_t i = 1; i < bindings.size(); ++i)
+        for(size_t i = 1; i < TEXTURE_COUNT + 1; ++i)
         {
             bindings[i].binding = i;
             bindings[i].descriptorType = vk::DescriptorType::eSampledImage;
             bindings[i].descriptorCount = 1;
             bindings[i].stageFlags = vk::ShaderStageFlagBits::eFragment;
         }
+
+        const uint32_t infoUniformIndex = TEXTURE_COUNT + 1;
+        bindings[infoUniformIndex].binding = infoUniformIndex;
+        bindings[infoUniformIndex].descriptorType = vk::DescriptorType::eUniformBuffer;
+        bindings[infoUniformIndex].descriptorCount = 1;
+        bindings[infoUniformIndex].stageFlags = vk::ShaderStageFlagBits::eFragment;
 
         return bindings;
     }

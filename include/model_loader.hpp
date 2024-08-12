@@ -25,6 +25,7 @@ private:
 
     vk::PrimitiveTopology MapGltfTopology(fastgltf::PrimitiveType gltfTopology);
     vk::IndexType MapIndexType(fastgltf::ComponentType componentType);
+    uint32_t MapTextureIndexToImageIndex(uint32_t textureIndex, const fastgltf::Asset& gltf);
 
     void CalculateTangents(MeshPrimitive& primitive);
     glm::vec4 CalculateTangent(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec2 uv0, glm::vec2 uv1, glm::vec2 uv2, glm::vec3 normal);

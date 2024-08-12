@@ -92,10 +92,12 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
     CreateSyncObjects();
     CreateDescriptorPool();
 
+    CreateDefaultMaterial();
+
 
     ModelLoader modelLoader;
-    //Model model = modelLoader.Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
-    Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
+    Model model = modelLoader.Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
+    //Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
     _model = LoadModel(model);
 
     CreateDescriptorSets();
@@ -234,17 +236,18 @@ void Engine::Shutdown()
     {
         for(auto& primitive : mesh.primitives)
         {
-            _device.destroy(primitive.vertexBuffer);
-            _device.destroy(primitive.indexBuffer);
-            vmaFreeMemory(_vmaAllocator, primitive.vertexBufferAllocation);
-            vmaFreeMemory(_vmaAllocator, primitive.indexBufferAllocation);
+            vmaDestroyBuffer(_vmaAllocator, primitive.vertexBuffer, primitive.vertexBufferAllocation);
+            vmaDestroyBuffer(_vmaAllocator, primitive.indexBuffer, primitive.indexBufferAllocation);
         }
     }
     for(auto& texture : _model.textures)
     {
-        _device.destroy(texture->image);
         _device.destroy(texture->imageView);
-        vmaFreeMemory(_vmaAllocator, texture->imageAllocation);
+        vmaDestroyImage(_vmaAllocator, texture->image, texture->imageAllocation);
+    }
+    for(auto& material : _model.materials)
+    {
+        vmaDestroyBuffer(_vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
     }
 
     _swapChain.reset();
@@ -262,12 +265,10 @@ void Engine::Shutdown()
 
     for(size_t i = 0; i < _frameData.size(); ++i)
     {
-        _device.destroy(_frameData[i].uniformBuffer);
         vmaUnmapMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation);
-        vmaFreeMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation);
+        vmaDestroyBuffer(_vmaAllocator, _frameData[i].uniformBuffer, _frameData[i].uniformBufferAllocation);
 
-        _device.destroy(_frameData[i].gBuffersImageArray);
-        vmaFreeMemory(_vmaAllocator, _frameData[i].gBufferAllocation);
+        vmaDestroyImage(_vmaAllocator, _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation);
         for(size_t j = 0; j < _frameData[i].gBufferViews.size(); ++j)
         {
             _device.destroy(_frameData[i].gBufferViews[j]);
@@ -844,11 +845,13 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
             if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
                 throw std::runtime_error("No support for topology other than triangle list!");
 
+            const MaterialHandle& material = primitive.material != nullptr ? *primitive.material : _defaultMaterial;
+
             vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
             vk::DeviceSize offsets[] = { 0 };
 
             commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 0, 1, &_frameData[_currentFrame].geometryDescriptorSet, 0, nullptr);
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 1, 1, &primitive.material->descriptorSet, 0, nullptr);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 1, 1, &material.descriptorSet, 0, nullptr);
 
             commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
             commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
@@ -988,7 +991,7 @@ void Engine::UpdateUniformData(uint32_t currentFrame)
 
     UBO ubo{};
     ubo.model = glm::rotate(glm::mat4{1.0f}, time * glm::radians(90.0f), glm::vec3{0.0f, 1.0f, 0.0f});
-    ubo.view = glm::lookAt(glm::vec3{3.0f}, glm::vec3{0.0f}, glm::vec3{0.0f, 1.0f, 0.0f});
+    ubo.view = glm::lookAt(glm::vec3{0.7f}, glm::vec3{0.0f}, glm::vec3{0.0f, 1.0f, 0.0f});
     ubo.proj = glm::perspective(glm::radians(45.0f), _swapChain->GetExtent().width / static_cast<float>(_swapChain->GetExtent().height), 0.01f, 100.0f);
     ubo.proj[1][1] *= -1;
 
@@ -1074,7 +1077,7 @@ void Engine::CreateDescriptorPool()
     vk::DescriptorPoolCreateInfo createInfo{};
     createInfo.poolSizeCount = poolSizes.size();
     createInfo.pPoolSizes = poolSizes.data();
-    createInfo.maxSets = MAX_FRAMES_IN_FLIGHT * 2 + 1 + 1;
+    createInfo.maxSets = 200;
     createInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
     util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }
@@ -1147,6 +1150,8 @@ void Engine::CreateTextureImage(const Texture& texture, TextureHandle& textureHa
 
     _device.destroy(stagingBuffer, nullptr);
     vmaFreeMemory(_vmaAllocator, stagingBufferAllocation);
+
+    textureHandle.imageView = util::CreateImageView(_device, textureHandle.image, texture.GetFormat(), vk::ImageAspectFlagBits::eColor);
 }
 
 void Engine::CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height)
@@ -1262,7 +1267,6 @@ ModelHandle Engine::LoadModel(const Model& model)
         textureHandle.numChannels = texture.numChannels;
 
         CreateTextureImage(texture, textureHandle, textureHandle.format);
-        textureHandle.imageView = util::CreateImageView(_device, textureHandle.image, texture.GetFormat(), vk::ImageAspectFlagBits::eColor);
 
         modelHandle.textures.emplace_back(std::make_shared<TextureHandle>(textureHandle));
     }
@@ -1270,44 +1274,28 @@ ModelHandle Engine::LoadModel(const Model& model)
     // Load materials
     for(const auto& material : model.materials)
     {
-        MaterialHandle materialHandle;
-        materialHandle.textures[0] = modelHandle.textures[material.albedoIndex];
-        materialHandle.textures[1] = modelHandle.textures[material.metallicRoughnessIndex];
-        materialHandle.textures[2] = modelHandle.textures[material.normalIndex];
-        materialHandle.textures[3] = modelHandle.textures[material.occlusionIndex];
-        materialHandle.textures[4] = modelHandle.textures[material.emissiveIndex];
+        std::array<std::shared_ptr<TextureHandle>, 5> textures;
+        textures[0] = material.albedoIndex.has_value() ? modelHandle.textures[material.albedoIndex.value()] : nullptr;
+        textures[1] = material.metallicRoughnessIndex.has_value() ? modelHandle.textures[material.metallicRoughnessIndex.value()] : nullptr;
+        textures[2] = material.normalIndex.has_value() ? modelHandle.textures[material.normalIndex.value()] : nullptr;
+        textures[3] = material.occlusionIndex.has_value() ? modelHandle.textures[material.occlusionIndex.value()] : nullptr;
+        textures[4] = material.emissiveIndex.has_value() ? modelHandle.textures[material.emissiveIndex.value()] : nullptr;
 
-        vk::DescriptorSetAllocateInfo allocateInfo{};
-        allocateInfo.descriptorPool = _descriptorPool;
-        allocateInfo.descriptorSetCount = 1;
-        allocateInfo.pSetLayouts = &_materialDescriptorSetLayout;
+        MaterialHandle::MaterialInfo info;
+        info.useAlbedoMap = material.albedoIndex.has_value();
+        info.useMRMap = material.metallicRoughnessIndex.has_value();
+        info.useNormalMap = material.normalIndex.has_value();
+        info.useOcclusionMap = material.occlusionIndex.has_value();
+        info.useEmissiveMap = material.emissiveIndex.has_value();
 
-        util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, &materialHandle.descriptorSet),
-                        "Failed allocating material descriptor set!");
+        info.albedoFactor = material.albedoFactor;
+        info.metallicFactor = material.metallicFactor;
+        info.roughnessFactor = material.roughnessFactor;
+        info.normalScale = material.normalScale;
+        info.occlusionStrength = material.occlusionStrength;
+        info.emissiveFactor = material.emissiveFactor;
 
-        std::array<vk::DescriptorImageInfo, 6> imageInfos;
-        imageInfos[0].sampler = _sampler;
-        for(size_t i = 1; i < imageInfos.size(); ++i)
-        {
-            imageInfos[i].imageView = materialHandle.textures[i - 1]->imageView;
-            imageInfos[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        }
-
-        std::array<vk::WriteDescriptorSet, imageInfos.size()> writes;
-        for(size_t i = 0; i < writes.size(); ++i)
-        {
-            writes[i].dstSet = materialHandle.descriptorSet;
-            writes[i].dstBinding = i;
-            writes[i].dstArrayElement = 0;
-            // Hacky way of keeping this process in one loop.
-            writes[i].descriptorType = i == 0 ? vk::DescriptorType::eSampler : vk::DescriptorType::eSampledImage;
-            writes[i].descriptorCount = 1;
-            writes[i].pImageInfo = &imageInfos[i];
-        }
-
-        _device.updateDescriptorSets(writes.size(), writes.data(), 0, nullptr);
-
-        modelHandle.materials.emplace_back(std::make_shared<MaterialHandle>(materialHandle));
+        modelHandle.materials.emplace_back(std::make_shared<MaterialHandle>(CreateMaterial(textures, info)));
     }
 
     // Load meshes
@@ -1318,7 +1306,7 @@ ModelHandle Engine::LoadModel(const Model& model)
         for(const auto& primitive : mesh.primitives)
         {
             MeshPrimitiveHandle primitiveHandle{};
-            primitiveHandle.material = modelHandle.materials[primitive.materialIndex];
+            primitiveHandle.material = primitive.materialIndex.has_value() ? modelHandle.materials[primitive.materialIndex.value()] : nullptr;
             primitiveHandle.topology = primitive.topology;
             primitiveHandle.indexType = primitive.indexType;
             primitiveHandle.triangleCount = primitive.indices.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
@@ -1363,4 +1351,80 @@ void Engine::InitializeDeferredRTs()
         util::TransitionImageLayout(cb, _frameData[i].gBuffersImageArray, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, FrameData::DEFERRED_ATTACHMENT_COUNT);
         util::EndSingleTimeCommands(_device, _graphicsQueue, cb, _commandPool);
     }
+}
+
+MaterialHandle Engine::CreateMaterial(const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info)
+{
+    MaterialHandle materialHandle;
+    materialHandle.textures = textures;
+
+    CreateBuffer(sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation);
+
+    void* uniformPtr;
+    util::VK_ASSERT(vmaMapMemory(_vmaAllocator, materialHandle.materialUniformAllocation, &uniformPtr), "Failed mapping memory for material UBO!");
+    std::memcpy(uniformPtr, &info, sizeof(info));
+    vmaUnmapMemory(_vmaAllocator, materialHandle.materialUniformAllocation);
+
+
+    vk::DescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.descriptorPool = _descriptorPool;
+    allocateInfo.descriptorSetCount = 1;
+    allocateInfo.pSetLayouts = &_materialDescriptorSetLayout;
+
+    util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, &materialHandle.descriptorSet),
+                    "Failed allocating material descriptor set!");
+
+    std::array<vk::DescriptorImageInfo, 6> imageInfos;
+    imageInfos[0].sampler = _sampler;
+    for(size_t i = 1; i < MaterialHandle::TEXTURE_COUNT + 1; ++i)
+    {
+        const MaterialHandle& material = textures[i - 1] != nullptr ? materialHandle : _defaultMaterial;
+
+        imageInfos[i].imageView = material.textures[i - 1]->imageView;
+        imageInfos[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    }
+
+    vk::DescriptorBufferInfo uniformInfo{};
+    uniformInfo.offset = 0;
+    uniformInfo.buffer = materialHandle.materialUniformBuffer;
+    uniformInfo.range = sizeof(MaterialHandle::MaterialInfo);
+
+    std::array<vk::WriteDescriptorSet, imageInfos.size() + 1> writes;
+    for(size_t i = 0; i < imageInfos.size(); ++i)
+    {
+        writes[i].dstSet = materialHandle.descriptorSet;
+        writes[i].dstBinding = i;
+        writes[i].dstArrayElement = 0;
+        // Hacky way of keeping this process in one loop.
+        writes[i].descriptorType = i == 0 ? vk::DescriptorType::eSampler : vk::DescriptorType::eSampledImage;
+        writes[i].descriptorCount = 1;
+        writes[i].pImageInfo = &imageInfos[i];
+    }
+    writes[imageInfos.size()].dstSet = materialHandle.descriptorSet;
+    writes[imageInfos.size()].dstBinding = imageInfos.size();
+    writes[imageInfos.size()].dstArrayElement = 0;
+    writes[imageInfos.size()].descriptorType = vk::DescriptorType::eUniformBuffer;
+    writes[imageInfos.size()].descriptorCount = 1;
+    writes[imageInfos.size()].pBufferInfo = &uniformInfo;
+
+    _device.updateDescriptorSets(writes.size(), writes.data(), 0, nullptr);
+
+    return materialHandle;
+}
+
+void Engine::CreateDefaultMaterial()
+{
+    Texture texture;
+    texture.width = 2;
+    texture.height = 2;
+    texture.numChannels = 4;
+    texture.data = std::vector<std::byte>(texture.width * texture.height * texture.numChannels * sizeof(float));
+    std::array<std::shared_ptr<TextureHandle>, 5> textures;
+    std::for_each(textures.begin(), textures.end(), [&texture, this](auto& ptr){
+        ptr = std::make_shared<TextureHandle>();
+        CreateTextureImage(texture, *ptr, vk::Format::eR8G8B8A8Srgb);
+    });
+
+    MaterialHandle::MaterialInfo info;
+    _defaultMaterial = CreateMaterial(textures, info);
 }
