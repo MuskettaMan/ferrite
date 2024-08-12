@@ -7,6 +7,8 @@
 #include <set>
 #include <implot.h>
 #include <thread>
+#include "spdlog/spdlog.h"
+#include <spdlog/fmt/bundled/printf.h>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -17,6 +19,9 @@
 #include <stb_image.h>
 
 #define VMA_IMPLEMENTATION
+#define VMA_LEAK_LOG_FORMAT(format, ...) do { \
+        spdlog::info(fmt::sprintf(format, __VA_ARGS__)); \
+    } while(false)
 #include "vk_mem_alloc.h"
 
 #include "imgui.h"
@@ -28,7 +33,6 @@
 #include "stopwatch.hpp"
 #include "model_loader.hpp"
 #include "util.hpp"
-#include "spdlog/spdlog.h"
 
 Engine::Engine()
 {
@@ -248,6 +252,13 @@ void Engine::Shutdown()
     for(auto& material : _model.materials)
     {
         vmaDestroyBuffer(_vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
+    }
+
+    vmaDestroyBuffer(_vmaAllocator, _defaultMaterial.materialUniformBuffer, _defaultMaterial.materialUniformAllocation);
+    for(auto& texture : _defaultMaterial.textures)
+    {
+        vmaDestroyImage(_vmaAllocator, texture->image, texture->imageAllocation);
+        _device.destroy(texture->imageView);
     }
 
     _swapChain.reset();
@@ -920,7 +931,7 @@ void Engine::CreateSyncObjects()
     }
 }
 
-void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation) const
+void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation, std::string_view name) const
 {
     vk::BufferCreateInfo bufferInfo{};
     bufferInfo.size = size;
@@ -935,20 +946,21 @@ void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::B
         allocationInfo.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
     util::VK_ASSERT(vmaCreateBuffer(_vmaAllocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo), &allocationInfo, reinterpret_cast<VkBuffer*>(&buffer), &allocation, nullptr), "Failed creating buffer!");
+    vmaSetAllocationName(_vmaAllocator, allocation, name.data());
 }
 
 template <typename T>
-void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage) const
+void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage, std::string_view name) const
 {
     vk::DeviceSize bufferSize = vec.size() * sizeof(T);
 
     vk::Buffer stagingBuffer;
     VmaAllocation stagingBufferAllocation;
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation);
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Staging buffer");
 
     vmaCopyMemoryToAllocation(_vmaAllocator, vec.data(), stagingBufferAllocation, 0, bufferSize);
 
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation);
+    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation, name.data());
 
     CopyBuffer(stagingBuffer, buffer, bufferSize);
     _device.destroy(stagingBuffer, nullptr);
@@ -976,7 +988,8 @@ void Engine::CreateUniformBuffers()
     {
         CreateBuffer(bufferSize,
                      vk::BufferUsageFlagBits::eUniformBuffer,
-                     _frameData[i].uniformBuffer, true, _frameData[i].uniformBufferAllocation);
+                     _frameData[i].uniformBuffer, true, _frameData[i].uniformBufferAllocation,
+                     "Uniform buffer");
 
         util::VK_ASSERT(vmaMapMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation, &_frameData[i].uniformBufferMapped), "Failed mapping memory for UBO!");
     }
@@ -1130,13 +1143,13 @@ void Engine::CreateTextureImage(const Texture& texture, TextureHandle& textureHa
     vk::Buffer stagingBuffer;
     VmaAllocation stagingBufferAllocation;
 
-    CreateBuffer(imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation);
+    CreateBuffer(imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Texture staging buffer");
 
     vmaCopyMemoryToAllocation(_vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
 
     util::CreateImage(_vmaAllocator, texture.width, texture.height, format,
                       vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-                      textureHandle.image, textureHandle.imageAllocation);
+                      textureHandle.image, textureHandle.imageAllocation, "Texture image");
 
     vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
     util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
@@ -1311,8 +1324,8 @@ ModelHandle Engine::LoadModel(const Model& model)
             primitiveHandle.indexType = primitive.indexType;
             primitiveHandle.triangleCount = primitive.indices.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
 
-            CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer);
-            CreateLocalBuffer(primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer);
+            CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
+            CreateLocalBuffer(primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
 
             meshHandle.primitives.emplace_back(primitiveHandle);
         }
@@ -1332,7 +1345,7 @@ void Engine::InitializeDeferredRTs()
         uint32_t height = _swapChain->GetImageSize().y;
         util::CreateImage(_vmaAllocator, width, height, format,
                           vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-                          _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation, FrameData::DEFERRED_ATTACHMENT_COUNT);
+                          _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation, "GBuffer array", FrameData::DEFERRED_ATTACHMENT_COUNT);
         util::NameObject(_frameData[i].gBuffersImageArray, "[IMAGE] GBuffer Array", _device, _dldi);
 
         for(size_t j = 0; j < FrameData::DEFERRED_ATTACHMENT_COUNT; ++j)
@@ -1358,7 +1371,7 @@ MaterialHandle Engine::CreateMaterial(const std::array<std::shared_ptr<TextureHa
     MaterialHandle materialHandle;
     materialHandle.textures = textures;
 
-    CreateBuffer(sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation);
+    CreateBuffer(sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation, "Material uniform buffer");
 
     void* uniformPtr;
     util::VK_ASSERT(vmaMapMemory(_vmaAllocator, materialHandle.materialUniformAllocation, &uniformPtr), "Failed mapping memory for material UBO!");

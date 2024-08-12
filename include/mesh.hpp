@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include "vk_mem_alloc.h"
 #include <memory>
+#include <optional>
 
 struct Vertex
 {

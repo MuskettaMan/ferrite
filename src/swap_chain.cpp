@@ -182,7 +182,7 @@ void SwapChain::CreateDepthResources(const glm::uvec2& screenSize)
     util::CreateImage(_allocator, screenSize.x, screenSize.y,
                       _depthFormat, vk::ImageTiling::eOptimal,
                       vk::ImageUsageFlagBits::eDepthStencilAttachment,
-                      _depthImage, _depthImageAllocation);
+                      _depthImage, _depthImageAllocation, "Depth image");
 
     _depthImageView = util::CreateImageView(_device, _depthImage, _depthFormat, vk::ImageAspectFlagBits::eDepth);
 

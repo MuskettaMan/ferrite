@@ -83,7 +83,7 @@ namespace util
         throw std::runtime_error("Failed finding suitable memory type!");
     }
 
-    static void CreateImage(VmaAllocator allocator, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::Image& image, VmaAllocation& allocation, uint32_t numLayers = 1)
+    static void CreateImage(VmaAllocator allocator, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::Image& image, VmaAllocation& allocation, std::string_view name, uint32_t numLayers = 1)
     {
         vk::ImageCreateInfo createInfo{};
         createInfo.imageType = vk::ImageType::e2D;
@@ -104,6 +104,7 @@ namespace util
         allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
         util::VK_ASSERT(vmaCreateImage(allocator, reinterpret_cast<VkImageCreateInfo*>(&createInfo), &allocationInfo, reinterpret_cast<VkImage*>(&image), &allocation, nullptr), "Failed creating image!");
+        vmaSetAllocationName(allocator, allocation, name.data());
     }
 
     static vk::CommandBuffer BeginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool)
