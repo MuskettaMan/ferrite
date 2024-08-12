@@ -17,46 +17,22 @@ public:
         std::vector<vk::PresentModeKHR> presentModes;
     };
 
-    SwapChain(const VulkanBrain& brain, vk::Format depthFormat);
+    SwapChain(const VulkanBrain& brain);
     ~SwapChain();
     NON_MOVABLE(SwapChain);
     NON_COPYABLE(SwapChain);
 
-    void CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices);
-    void RecreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices);
-
-    [[nodiscard]]
-    static SupportDetails QuerySupport(vk::PhysicalDevice device, vk::SurfaceKHR surface);
-
-    [[nodiscard]]
+    void CreateSwapChain(const glm::uvec2& screenSize);
+    void Resize(const glm::uvec2& screenSize);
     size_t GetImageCount() const { return _images.size(); };
-
-    [[nodiscard]]
     vk::SwapchainKHR GetSwapChain() const { return _swapChain; }
-
-    [[nodiscard]]
     vk::ImageView GetImageView(uint32_t index) const { return _imageViews[index]; }
-
-    [[nodiscard]]
     vk::Extent2D GetExtent() const { return _extent; }
-
-    [[nodiscard]]
     vk::Format GetFormat() const { return _format; }
-
-    [[nodiscard]]
     vk::Image GetImage(uint32_t index) const { return _images[index]; }
-
-    [[nodiscard]]
-    vk::Format GetDepthFormat() const { return _depthFormat; }
-
-    [[nodiscard]]
-    vk::Image GetDepthImage() const { return _depthImage; }
-
-    [[nodiscard]]
-    vk::ImageView GetDepthView() const { return _depthImageView; }
-
-    [[nodiscard]]
     glm::uvec2 GetImageSize() const { return _imageSize; }
+
+    static SupportDetails QuerySupport(vk::PhysicalDevice device, vk::SurfaceKHR surface);
 
 private:
     const VulkanBrain& _brain;
@@ -69,15 +45,9 @@ private:
     std::vector<vk::ImageView> _imageViews;
     vk::Format _format;
 
-    vk::Image _depthImage;
-    VmaAllocation _depthImageAllocation;
-    vk::ImageView _depthImageView;
-    vk::Format _depthFormat;
-
     void CleanUpSwapChain();
     vk::SurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
     vk::PresentModeKHR ChoosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
     vk::Extent2D ChooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities, const glm::uvec2& screenSize);
     void CreateSwapChainImageViews();
-    void CreateDepthResources(const glm::uvec2& screenSize);
 };

@@ -7,6 +7,7 @@
 #include <sstream>
 #include "spdlog/spdlog.h"
 #include "vk_mem_alloc.h"
+#include "vulkan_brain.hpp"
 
 namespace util
 {
@@ -107,6 +108,25 @@ namespace util
         vmaSetAllocationName(allocator, allocation, name.data());
     }
 
+
+    static void CreateBuffer(const VulkanBrain& brain, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation, std::string_view name)
+    {
+        vk::BufferCreateInfo bufferInfo{};
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+        bufferInfo.queueFamilyIndexCount = 1;
+        bufferInfo.pQueueFamilyIndices = &brain.queueFamilyIndices.graphicsFamily.value();
+
+        VmaAllocationCreateInfo allocationInfo{};
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        if(mappable)
+            allocationInfo.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        util::VK_ASSERT(vmaCreateBuffer(brain.vmaAllocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo), &allocationInfo, reinterpret_cast<VkBuffer*>(&buffer), &allocation, nullptr), "Failed creating buffer!");
+        vmaSetAllocationName(brain.vmaAllocator, allocation, name.data());
+    }
+
     static vk::CommandBuffer BeginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool)
     {
         vk::CommandBufferAllocateInfo allocateInfo{};
@@ -137,6 +157,37 @@ namespace util
         queue.waitIdle();
 
         device.free(commandPool, commandBuffer);
+    }
+
+    static void CopyBuffer(const VulkanBrain& brain, vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size)
+    {
+        vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
+
+        vk::BufferCopy copyRegion{};
+        copyRegion.srcOffset = 0;
+        copyRegion.dstOffset = 0;
+        copyRegion.size = size;
+        commandBuffer.copyBuffer(srcBuffer, dstBuffer, 1, &copyRegion);
+
+        util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
+    }
+
+    template <typename T>
+    static void CreateLocalBuffer(const VulkanBrain& brain, const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage, std::string_view name)
+    {
+        vk::DeviceSize bufferSize = vec.size() * sizeof(T);
+
+        vk::Buffer stagingBuffer;
+        VmaAllocation stagingBufferAllocation;
+        CreateBuffer(brain, bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Staging buffer");
+
+        vmaCopyMemoryToAllocation(brain.vmaAllocator, vec.data(), stagingBufferAllocation, 0, bufferSize);
+
+        CreateBuffer(brain, bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation, name.data());
+
+        CopyBuffer(brain, stagingBuffer, buffer, bufferSize);
+        brain.device.destroy(stagingBuffer, nullptr);
+        vmaFreeMemory(brain.vmaAllocator, stagingBufferAllocation);
     }
 
     static void TransitionImageLayout(vk::CommandBuffer commandBuffer, vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t numLayers = 1)

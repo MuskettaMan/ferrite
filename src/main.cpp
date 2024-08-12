@@ -4,11 +4,10 @@
 #include "linux/linux_app.hpp"
 #endif
 
-#include <memory>
-#include <iostream>
+// THIS FILE SHOULD ALWAYS BE AFTER THE IMPLEMENTATIONS ABOVE ^
+#include "include.hpp"
+
 #include "engine.hpp"
-#include "imgui.h"
-#include <spdlog/spdlog.h>
 
 std::shared_ptr<Application> g_app;
 std::unique_ptr<Engine> g_engine;

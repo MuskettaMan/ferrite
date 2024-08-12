@@ -1,18 +1,5 @@
-#include <iostream>
-#include <cstdint>
-#include <vector>
-#include <algorithm>
-#include <cstring>
-#include <set>
-#include <implot.h>
-#include <thread>
-#include "spdlog/spdlog.h"
-#include <spdlog/fmt/bundled/printf.h>
+#include "engine.hpp"
 
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -23,8 +10,9 @@
     } while(false)
 #include "vk_mem_alloc.h"
 
+
+#include "include.hpp"
 #include "imgui.h"
-#include "engine.hpp"
 #include "vulkan_validation.hpp"
 #include "vulkan_helper.hpp"
 #include "shaders/shader_loader.hpp"
@@ -33,6 +21,7 @@
 #include "model_loader.hpp"
 #include "util.hpp"
 #include "vulkan_brain.hpp"
+#include <implot.h>
 
 Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> application) :
     _brain(initInfo)
@@ -43,27 +32,19 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
     _application = std::move(application);
 
+    _swapChain = std::make_unique<SwapChain>(_brain);
 
-    auto supportedDepthFormat = util::FindSupportedFormat(_brain.physicalDevice, { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
-                                                          vk::ImageTiling::eOptimal,
-                                                          vk::FormatFeatureFlagBits::eDepthStencilAttachment);
-
-    assert(supportedDepthFormat.has_value() && "No supported depth format!");
-
-    _swapChain = std::make_unique<SwapChain>(_brain, supportedDepthFormat.value());
-
-    _swapChain->CreateSwapChain(glm::uvec2{ initInfo.width, initInfo.height }, _brain.queueFamilyIndices);
+    _swapChain->CreateSwapChain(glm::uvec2{ initInfo.width, initInfo.height });
 
 
     CreateDescriptorSetLayout();
-    _gBuffers = std::make_unique<GBuffers<MAX_FRAMES_IN_FLIGHT, DEFERRED_ATTACHMENT_COUNT>>(_brain, _swapChain->GetImageSize());
+    _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
+    _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout);
 
     CreateGeometryPipeline();
     CreateLightingPipeline();
 
     CreateTextureSampler();
-
-    CreateUniformBuffers();
 
     CreateCommandBuffers();
     CreateSyncObjects();
@@ -82,7 +63,7 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
-    pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
+    pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _gBuffers->DepthFormat();
 
     _application->InitImGui();
 
@@ -125,15 +106,14 @@ void Engine::Run()
 
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
     {
-        _swapChain->RecreateSwapChain(_application->DisplaySize(), _brain.queueFamilyIndices);
+        _swapChain->Resize(_application->DisplaySize());
+        _gBuffers->Resize(_application->DisplaySize());
 
         return;
     } else
         util::VK_ASSERT(result, "Failed acquiring next image from swap chain!");
 
     util::VK_ASSERT(_brain.device.resetFences(1, &_inFlightFences[_currentFrame]), "Failed resetting fences!");
-
-    UpdateUniformData(_currentFrame);
 
     ImGui_ImplVulkan_NewFrame();
     _application->NewImGuiFrame();
@@ -177,7 +157,8 @@ void Engine::Run()
 
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || _swapChain->GetImageSize() != _application->DisplaySize())
     {
-        _swapChain->RecreateSwapChain(_application->DisplaySize(), _brain.queueFamilyIndices);
+        _swapChain->Resize(_application->DisplaySize());
+        _gBuffers->Resize(_application->DisplaySize());
     }
     else
     {
@@ -231,158 +212,17 @@ Engine::~Engine()
 
     _swapChain.reset();
 
-    _brain.device.destroy(_geometryPipeline);
-    _brain.device.destroy(_geometryPipelineLayout);
     _brain.device.destroy(_lightingPipeline);
     _brain.device.destroy(_lightingPipelineLayout);
 
-    for(size_t i = 0; i < _frameData.size(); ++i)
-    {
-        vmaUnmapMemory(_brain.vmaAllocator, _frameData[i].uniformBufferAllocation);
-        vmaDestroyBuffer(_brain.vmaAllocator, _frameData[i].uniformBuffer, _frameData[i].uniformBufferAllocation);
-    }
 
-    _brain.device.destroy(_geometryDescriptorSetLayout);
     _brain.device.destroy(_lightingDescriptorSetLayout);
     _brain.device.destroy(_materialDescriptorSetLayout);
 }
 
 void Engine::CreateGeometryPipeline()
 {
-    vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    std::array<vk::DescriptorSetLayout, 2> layouts = { _geometryDescriptorSetLayout, _materialDescriptorSetLayout };
-    pipelineLayoutCreateInfo.setLayoutCount = layouts.size();
-    pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
-    pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
-    pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-    util::VK_ASSERT(_brain.device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_geometryPipelineLayout),
-                    "Failed creating geometry pipeline layout!");
-
-    auto vertByteCode = shader::ReadFile("shaders/geom-v.spv");
-    auto fragByteCode = shader::ReadFile("shaders/geom-f.spv");
-
-    vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _brain.device);
-    vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _brain.device);
-
-    vk::PipelineShaderStageCreateInfo vertShaderStageCreateInfo{};
-    vertShaderStageCreateInfo.stage = vk::ShaderStageFlagBits::eVertex;
-    vertShaderStageCreateInfo.module = vertModule;
-    vertShaderStageCreateInfo.pName = "main";
-
-    vk::PipelineShaderStageCreateInfo fragShaderStageCreateInfo{};
-    fragShaderStageCreateInfo.stage = vk::ShaderStageFlagBits::eFragment;
-    fragShaderStageCreateInfo.module = fragModule;
-    fragShaderStageCreateInfo.pName = "main";
-
-    vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageCreateInfo, fragShaderStageCreateInfo };
-
-    auto bindingDesc = Vertex::GetBindingDescription();
-    auto attributes = Vertex::GetAttributeDescriptions();
-
-    vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo{};
-    vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
-    vertexInputStateCreateInfo.pVertexBindingDescriptions = &bindingDesc;
-    vertexInputStateCreateInfo.vertexAttributeDescriptionCount = attributes.size();
-    vertexInputStateCreateInfo.pVertexAttributeDescriptions = attributes.data();
-
-    vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo{};
-    inputAssemblyStateCreateInfo.topology = vk::PrimitiveTopology::eTriangleList;
-    inputAssemblyStateCreateInfo.primitiveRestartEnable = vk::False;
-
-    vk::Extent2D swapChainExtent{ _swapChain->GetExtent() };
-    _viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f,
-                              1.0f };
-    _scissor = vk::Rect2D{ vk::Offset2D{ 0, 0 }, swapChainExtent };
-
-    std::array<vk::DynamicState, 2> dynamicStates = {
-            vk::DynamicState::eViewport,
-            vk::DynamicState::eScissor,
-    };
-
-    vk::PipelineDynamicStateCreateInfo dynamicStateCreateInfo{};
-    dynamicStateCreateInfo.dynamicStateCount = dynamicStates.size();
-    dynamicStateCreateInfo.pDynamicStates = dynamicStates.data();
-
-    vk::PipelineViewportStateCreateInfo viewportStateCreateInfo{};
-    viewportStateCreateInfo.viewportCount = 1;
-    viewportStateCreateInfo.scissorCount = 1;
-
-    vk::PipelineRasterizationStateCreateInfo rasterizationStateCreateInfo{};
-    rasterizationStateCreateInfo.depthClampEnable = vk::False;
-    rasterizationStateCreateInfo.rasterizerDiscardEnable = vk::False;
-    rasterizationStateCreateInfo.polygonMode = vk::PolygonMode::eFill;
-    rasterizationStateCreateInfo.lineWidth = 1.0f;
-    rasterizationStateCreateInfo.cullMode = vk::CullModeFlagBits::eBack;
-    rasterizationStateCreateInfo.frontFace = vk::FrontFace::eCounterClockwise;
-    rasterizationStateCreateInfo.depthBiasEnable = vk::False;
-    rasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
-    rasterizationStateCreateInfo.depthBiasClamp = 0.0f;
-    rasterizationStateCreateInfo.depthBiasSlopeFactor = 0.0f;
-
-    vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo{};
-    multisampleStateCreateInfo.sampleShadingEnable = vk::False;
-    multisampleStateCreateInfo.rasterizationSamples = vk::SampleCountFlagBits::e1;
-    multisampleStateCreateInfo.minSampleShading = 1.0f;
-    multisampleStateCreateInfo.pSampleMask = nullptr;
-    multisampleStateCreateInfo.alphaToCoverageEnable = vk::False;
-    multisampleStateCreateInfo.alphaToOneEnable = vk::False;
-
-    std::array<vk::PipelineColorBlendAttachmentState, DEFERRED_ATTACHMENT_COUNT> colorBlendAttachmentStates{};
-    for(auto& blendAttachmentState : colorBlendAttachmentStates)
-    {
-        blendAttachmentState.blendEnable = vk::False;
-        blendAttachmentState.colorWriteMask =
-                vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
-                vk::ColorComponentFlagBits::eA;
-    }
-
-    vk::PipelineColorBlendStateCreateInfo colorBlendStateCreateInfo{};
-    colorBlendStateCreateInfo.logicOpEnable = vk::False;
-    colorBlendStateCreateInfo.attachmentCount = colorBlendAttachmentStates.size();
-    colorBlendStateCreateInfo.pAttachments = colorBlendAttachmentStates.data();
-
-    vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo{};
-    depthStencilStateCreateInfo.depthTestEnable = true;
-    depthStencilStateCreateInfo.depthWriteEnable = true;
-    depthStencilStateCreateInfo.depthCompareOp = vk::CompareOp::eLess;
-    depthStencilStateCreateInfo.depthBoundsTestEnable = false;
-    depthStencilStateCreateInfo.minDepthBounds = 0.0f;
-    depthStencilStateCreateInfo.maxDepthBounds = 1.0f;
-    depthStencilStateCreateInfo.stencilTestEnable = false;
-
-    vk::GraphicsPipelineCreateInfo geometryPipelineCreateInfo{};
-    geometryPipelineCreateInfo.stageCount = 2;
-    geometryPipelineCreateInfo.pStages = shaderStages;
-    geometryPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
-    geometryPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
-    geometryPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
-    geometryPipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
-    geometryPipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
-    geometryPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
-    geometryPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
-    geometryPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
-    geometryPipelineCreateInfo.layout = _geometryPipelineLayout;
-    geometryPipelineCreateInfo.subpass = 0;
-    geometryPipelineCreateInfo.basePipelineHandle = nullptr;
-    geometryPipelineCreateInfo.basePipelineIndex = -1;
-
-    vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
-    std::array<vk::Format, DEFERRED_ATTACHMENT_COUNT> formats{};
-    std::fill(formats.begin(), formats.end(), vk::Format::eR16G16B16A16Sfloat);
-    pipelineRenderingCreateInfoKhr.colorAttachmentCount = DEFERRED_ATTACHMENT_COUNT;
-    pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = formats.data();
-    pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
-
-    geometryPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
-    geometryPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
-
-    auto result = _brain.device.createGraphicsPipeline(nullptr, geometryPipelineCreateInfo, nullptr);
-    util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
-    _geometryPipeline = result.value;
-
-    _brain.device.destroy(vertModule);
-    _brain.device.destroy(fragModule);
 }
 
 void Engine::CreateLightingPipeline()
@@ -419,11 +259,6 @@ void Engine::CreateLightingPipeline()
     vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo{};
     inputAssemblyStateCreateInfo.topology = vk::PrimitiveTopology::eTriangleList;
     inputAssemblyStateCreateInfo.primitiveRestartEnable = vk::False;
-
-    vk::Extent2D swapChainExtent{ _swapChain->GetExtent() };
-    _viewport = vk::Viewport{ 0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f,
-                              1.0f };
-    _scissor = vk::Rect2D{ vk::Offset2D{ 0, 0 }, swapChainExtent };
 
     std::array<vk::DynamicState, 2> dynamicStates = {
             vk::DynamicState::eViewport,
@@ -527,73 +362,7 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
                                 vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
-    std::array<vk::RenderingAttachmentInfoKHR, DEFERRED_ATTACHMENT_COUNT> colorAttachmentInfos{};
-    for(size_t i = 0; i < colorAttachmentInfos.size(); ++i)
-    {
-        vk::RenderingAttachmentInfoKHR& info{ colorAttachmentInfos[i] };
-        info.imageView = _gBuffers->GBufferView(_currentFrame, i);
-        info.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-        info.storeOp = vk::AttachmentStoreOp::eStore;
-        info.loadOp = vk::AttachmentLoadOp::eClear;
-        info.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
-    }
-
-    vk::RenderingAttachmentInfoKHR depthAttachmentInfo{};
-    depthAttachmentInfo.imageView = _swapChain->GetDepthView();
-    depthAttachmentInfo.imageLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
-    depthAttachmentInfo.storeOp = vk::AttachmentStoreOp::eDontCare;
-    depthAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
-    depthAttachmentInfo.clearValue.depthStencil = vk::ClearDepthStencilValue{ 1.0f, 0 };
-
-    vk::RenderingAttachmentInfoKHR  stencilAttachmentInfo{depthAttachmentInfo};
-    stencilAttachmentInfo.storeOp = vk::AttachmentStoreOp::eDontCare;
-    stencilAttachmentInfo.loadOp = vk::AttachmentLoadOp::eDontCare;
-    stencilAttachmentInfo.clearValue.depthStencil = vk::ClearDepthStencilValue{ 1.0f, 0 };
-
-    vk::RenderingInfoKHR renderingInfo{};
-    glm::uvec2 displaySize = _swapChain->GetImageSize();
-    renderingInfo.renderArea.extent = vk::Extent2D{ displaySize.x, displaySize.y };
-    renderingInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
-    renderingInfo.colorAttachmentCount = colorAttachmentInfos.size();
-    renderingInfo.pColorAttachments = colorAttachmentInfos.data();
-    renderingInfo.layerCount = 1;
-    renderingInfo.pDepthAttachment = &depthAttachmentInfo;
-    renderingInfo.pStencilAttachment = util::HasStencilComponent(_swapChain->GetDepthFormat()) ? &stencilAttachmentInfo : nullptr;
-
-    util::BeginLabel(commandBuffer, "Geometry pass", glm::vec3{ 6.0f, 214.0f, 160.0f } / 255.0f, _brain.dldi);
-
-    commandBuffer.beginRenderingKHR(&renderingInfo, _brain.dldi);
-
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _geometryPipeline);
-
-    commandBuffer.setViewport(0, 1, &_viewport);
-    commandBuffer.setScissor(0, 1, &_scissor);
-
-    for(auto& mesh : _model.meshes)
-    {
-        for(auto& primitive : mesh.primitives)
-        {
-            if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
-                throw std::runtime_error("No support for topology other than triangle list!");
-
-            const MaterialHandle& material = primitive.material != nullptr ? *primitive.material : _defaultMaterial;
-
-            vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
-            vk::DeviceSize offsets[] = { 0 };
-
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 0, 1, &_frameData[_currentFrame].geometryDescriptorSet, 0, nullptr);
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 1, 1, &material.descriptorSet, 0, nullptr);
-
-            commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
-            commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
-
-            commandBuffer.drawIndexed(primitive.triangleCount, 1, 0, 0, 0);
-        }
-    }
-
-    commandBuffer.endRenderingKHR(_brain.dldi);
-
-    util::EndLabel(commandBuffer, _brain.dldi);
+    _geometryPipeline->RecordCommands(commandBuffer, _currentFrame, _model);
 
 
     util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),
@@ -607,8 +376,8 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
     finalColorAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
 
-    renderingInfo = vk::RenderingInfoKHR{};
-    renderingInfo.renderArea.extent = vk::Extent2D{ displaySize.x, displaySize.y };
+    vk::RenderingInfoKHR renderingInfo{};
+    renderingInfo.renderArea.extent = vk::Extent2D{ _gBuffers->Size().x, _gBuffers->Size().y };
     renderingInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachments = &finalColorAttachmentInfo;
@@ -651,107 +420,8 @@ void Engine::CreateSyncObjects()
     }
 }
 
-void Engine::CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation, std::string_view name) const
-{
-    vk::BufferCreateInfo bufferInfo{};
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-    bufferInfo.queueFamilyIndexCount = 1;
-    bufferInfo.pQueueFamilyIndices = &_brain.queueFamilyIndices.graphicsFamily.value();
-
-    VmaAllocationCreateInfo allocationInfo{};
-    allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    if(mappable)
-        allocationInfo.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-    util::VK_ASSERT(vmaCreateBuffer(_brain.vmaAllocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo), &allocationInfo, reinterpret_cast<VkBuffer*>(&buffer), &allocation, nullptr), "Failed creating buffer!");
-    vmaSetAllocationName(_brain.vmaAllocator, allocation, name.data());
-}
-
-template <typename T>
-void Engine::CreateLocalBuffer(const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage, std::string_view name) const
-{
-    vk::DeviceSize bufferSize = vec.size() * sizeof(T);
-
-    vk::Buffer stagingBuffer;
-    VmaAllocation stagingBufferAllocation;
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Staging buffer");
-
-    vmaCopyMemoryToAllocation(_brain.vmaAllocator, vec.data(), stagingBufferAllocation, 0, bufferSize);
-
-    CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation, name.data());
-
-    CopyBuffer(stagingBuffer, buffer, bufferSize);
-    _brain.device.destroy(stagingBuffer, nullptr);
-    vmaFreeMemory(_brain.vmaAllocator, stagingBufferAllocation);
-}
-
-void Engine::CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) const
-{
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
-
-    vk::BufferCopy copyRegion{};
-    copyRegion.srcOffset = 0;
-    copyRegion.dstOffset = 0;
-    copyRegion.size = size;
-    commandBuffer.copyBuffer(srcBuffer, dstBuffer, 1, &copyRegion);
-
-    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, commandBuffer, _brain.commandPool);
-}
-
-void Engine::CreateUniformBuffers()
-{
-    vk::DeviceSize bufferSize = sizeof(UBO);
-
-    for(size_t i = 0; i < _frameData.size(); ++i)
-    {
-        CreateBuffer(bufferSize,
-                     vk::BufferUsageFlagBits::eUniformBuffer,
-                     _frameData[i].uniformBuffer, true, _frameData[i].uniformBufferAllocation,
-                     "Uniform buffer");
-
-        util::VK_ASSERT(vmaMapMemory(_brain.vmaAllocator, _frameData[i].uniformBufferAllocation, &_frameData[i].uniformBufferMapped), "Failed mapping memory for UBO!");
-    }
-}
-
-void Engine::UpdateUniformData(uint32_t currentFrame)
-{
-    static auto startTime = std::chrono::high_resolution_clock::now();
-
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
-    UBO ubo{};
-    ubo.model = glm::rotate(glm::mat4{1.0f}, time * glm::radians(90.0f), glm::vec3{0.0f, 1.0f, 0.0f});
-    ubo.view = glm::lookAt(glm::vec3{0.7f}, glm::vec3{0.0f}, glm::vec3{0.0f, 1.0f, 0.0f});
-    ubo.proj = glm::perspective(glm::radians(45.0f), _swapChain->GetExtent().width / static_cast<float>(_swapChain->GetExtent().height), 0.01f, 100.0f);
-    ubo.proj[1][1] *= -1;
-
-    memcpy(_frameData[currentFrame].uniformBufferMapped, &ubo, sizeof(ubo));
-}
-
 void Engine::CreateDescriptorSetLayout()
 {
-    // Geometry
-    {
-        std::array<vk::DescriptorSetLayoutBinding, 1> bindings{};
-
-        vk::DescriptorSetLayoutBinding& descriptorSetLayoutBinding{bindings[0]};
-        descriptorSetLayoutBinding.binding = 0;
-        descriptorSetLayoutBinding.descriptorCount = 1;
-        descriptorSetLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
-        descriptorSetLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
-        descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
-
-        vk::DescriptorSetLayoutCreateInfo createInfo{};
-        createInfo.bindingCount = bindings.size();
-        createInfo.pBindings = bindings.data();
-
-        util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_geometryDescriptorSetLayout),
-                        "Failed creating geometry descriptor set layout!");
-    }
-
     // Lighting
     {
         std::array<vk::DescriptorSetLayoutBinding, DEFERRED_ATTACHMENT_COUNT + 1> bindings{};
@@ -795,22 +465,6 @@ void Engine::CreateDescriptorSets()
 {
     {
         std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
-        std::for_each(layouts.begin(), layouts.end(), [this](auto& l)
-        { l = _geometryDescriptorSetLayout; });
-        vk::DescriptorSetAllocateInfo allocateInfo{};
-        allocateInfo.descriptorPool = _brain.descriptorPool;
-        allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-        allocateInfo.pSetLayouts = layouts.data();
-
-        std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets;
-
-        util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
-                        "Failed allocating descriptor sets!");
-        for (size_t i = 0; i < descriptorSets.size(); ++i)
-            _frameData[i].geometryDescriptorSet = descriptorSets[i];
-    }
-    {
-        std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
         std::for_each(layouts.begin(), layouts.end(), [this](auto& l) { l = _lightingDescriptorSetLayout; });
         vk::DescriptorSetAllocateInfo allocateInfo{};
         allocateInfo.descriptorPool = _brain.descriptorPool;
@@ -827,7 +481,6 @@ void Engine::CreateDescriptorSets()
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        UpdateGeometryDescriptorSet(i);
         UpdateLightingDescriptorSet(i);
     }
 }
@@ -839,7 +492,7 @@ void Engine::CreateTextureImage(const Texture& texture, TextureHandle& textureHa
     vk::Buffer stagingBuffer;
     VmaAllocation stagingBufferAllocation;
 
-    CreateBuffer(imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Texture staging buffer");
+    util::CreateBuffer(_brain, imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Texture staging buffer");
 
     vmaCopyMemoryToAllocation(_brain.vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
 
@@ -906,26 +559,6 @@ void Engine::CreateTextureSampler()
     createInfo.maxLod = 0.0f;
 
     util::VK_ASSERT(_brain.device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
-}
-
-void Engine::UpdateGeometryDescriptorSet(uint32_t frameIndex)
-{
-    vk::DescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = _frameData[frameIndex].uniformBuffer;
-    bufferInfo.offset = 0;
-    bufferInfo.range = sizeof(UBO);
-
-    std::array<vk::WriteDescriptorSet, 1> descriptorWrites{};
-
-    vk::WriteDescriptorSet& bufferWrite{ descriptorWrites[0] };
-    bufferWrite.dstSet = _frameData[frameIndex].geometryDescriptorSet;
-    bufferWrite.dstBinding = 0;
-    bufferWrite.dstArrayElement = 0;
-    bufferWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
-    bufferWrite.descriptorCount = 1;
-    bufferWrite.pBufferInfo = &bufferInfo;
-
-    _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }
 
 void Engine::UpdateLightingDescriptorSet(uint32_t frameIndex)
@@ -1020,8 +653,8 @@ ModelHandle Engine::LoadModel(const Model& model)
             primitiveHandle.indexType = primitive.indexType;
             primitiveHandle.triangleCount = primitive.indices.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
 
-            CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
-            CreateLocalBuffer(primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
+            util::CreateLocalBuffer(_brain, primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
+            util::CreateLocalBuffer(_brain, primitive.indices, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
 
             meshHandle.primitives.emplace_back(primitiveHandle);
         }
@@ -1037,7 +670,7 @@ MaterialHandle Engine::CreateMaterial(const std::array<std::shared_ptr<TextureHa
     MaterialHandle materialHandle;
     materialHandle.textures = textures;
 
-    CreateBuffer(sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation, "Material uniform buffer");
+    util::CreateBuffer(_brain, sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation, "Material uniform buffer");
 
     void* uniformPtr;
     util::VK_ASSERT(vmaMapMemory(_brain.vmaAllocator, materialHandle.materialUniformAllocation, &uniformPtr), "Failed mapping memory for material UBO!");

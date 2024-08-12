@@ -3,9 +3,8 @@
 #include "vulkan/vulkan.h"
 #include "engine.hpp"
 
-SwapChain::SwapChain(const VulkanBrain& brain, vk::Format depthFormat) :
-    _brain(brain),
-    _depthFormat(depthFormat)
+SwapChain::SwapChain(const VulkanBrain& brain) :
+    _brain(brain)
 {
 }
 
@@ -14,7 +13,7 @@ SwapChain::~SwapChain()
     CleanUpSwapChain();
 }
 
-void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices)
+void SwapChain::CreateSwapChain(const glm::uvec2& screenSize)
 {
     _imageSize = screenSize;
     SupportDetails swapChainSupport = QuerySupport(_brain.physicalDevice, _brain.surface);
@@ -40,8 +39,8 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
     if(swapChainSupport.capabilities.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst)
         createInfo.imageUsage |= vk::ImageUsageFlagBits::eTransferDst;
 
-    uint32_t queueFamilyIndices[] = { familyIndices.graphicsFamily.value(), familyIndices.presentFamily.value() };
-    if(familyIndices.graphicsFamily != familyIndices.presentFamily)
+    uint32_t queueFamilyIndices[] = { _brain.queueFamilyIndices.graphicsFamily.value(), _brain.queueFamilyIndices.presentFamily.value() };
+    if(_brain.queueFamilyIndices.graphicsFamily != _brain.queueFamilyIndices.presentFamily)
     {
         createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
         createInfo.queueFamilyIndexCount = 2;
@@ -70,16 +69,15 @@ void SwapChain::CreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyI
     _extent = extent;
 
     CreateSwapChainImageViews();
-    CreateDepthResources(screenSize);
 }
 
-void SwapChain::RecreateSwapChain(const glm::uvec2& screenSize, const QueueFamilyIndices& familyIndices)
+void SwapChain::Resize(const glm::uvec2& screenSize)
 {
     _brain.device.waitIdle();
 
     CleanUpSwapChain();
 
-    CreateSwapChain(screenSize, familyIndices);
+    CreateSwapChain(screenSize);
 }
 
 void SwapChain::CreateSwapChainImageViews()
@@ -165,23 +163,5 @@ void SwapChain::CleanUpSwapChain()
         _brain.device.destroy(imageView);
 
     _brain.device.destroy(_swapChain);
-
-    _brain.device.destroy(_depthImage);
-    _brain.device.destroy(_depthImageView);
-    vmaFreeMemory(_brain.vmaAllocator, _depthImageAllocation);
-}
-
-void SwapChain::CreateDepthResources(const glm::uvec2& screenSize)
-{
-    util::CreateImage(_brain.vmaAllocator, screenSize.x, screenSize.y,
-                      _depthFormat, vk::ImageTiling::eOptimal,
-                      vk::ImageUsageFlagBits::eDepthStencilAttachment,
-                      _depthImage, _depthImageAllocation, "Depth image");
-
-    _depthImageView = util::CreateImageView(_brain.device, _depthImage, _depthFormat, vk::ImageAspectFlagBits::eDepth);
-
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
-    util::TransitionImageLayout(commandBuffer, _depthImage, _depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
-    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, commandBuffer, _brain.commandPool);
 }
 
