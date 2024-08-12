@@ -1,6 +1,7 @@
 #include "model_loader.hpp"
 #include "spdlog/spdlog.h"
 #include <fastgltf/tools.hpp>
+#include <fastgltf/glm_element_traits.hpp>
 #include "stb_image.h"
 
 ModelLoader::ModelLoader() : _parser()
@@ -34,6 +35,9 @@ Model ModelLoader::Load(std::string_view path)
     for(auto& image : gltf.images)
         model.textures.emplace_back(ProcessImage(image, gltf));
 
+    for(auto& material : gltf.materials)
+        model.materials.emplace_back(ProcessMaterial(material, gltf));
+
     // TODO: Can be used for decoding the hierarchy.
 //    fastgltf::iterateSceneNodes(gltf, 0, fastgltf::math::fmat4x4{}, [](fastgltf::Node& node, fastgltf::math::fmat4x4 nodeTransform) {
 //
@@ -59,6 +63,7 @@ MeshPrimitive ModelLoader::ProcessPrimitive(const fastgltf::Primitive& gltfPrimi
     MeshPrimitive primitive{};
 
     primitive.topology = MapGltfTopology(gltfPrimitive.type);
+    primitive.materialIndex = gltfPrimitive.materialIndex.value_or(-1);
 
     bool verticesReserved = false;
     bool tangentFound = false;
@@ -207,6 +212,25 @@ Texture ModelLoader::ProcessImage(const fastgltf::Image& gltfImage, const fastgl
     }, gltfImage.data);
 
     return texture;
+}
+
+Material ModelLoader::ProcessMaterial(const fastgltf::Material& gltfMaterial, const fastgltf::Asset& gltf)
+{
+    Material material{};
+
+    material.albedoIndex = gltfMaterial.pbrData.baseColorTexture.has_value() ? gltfMaterial.pbrData.baseColorTexture.value().textureIndex : -1;
+    material.metallicRoughnessIndex = gltfMaterial.pbrData.metallicRoughnessTexture.has_value() ? gltfMaterial.pbrData.metallicRoughnessTexture.value().textureIndex : -1;
+    material.normalIndex = gltfMaterial.normalTexture.has_value() ? gltfMaterial.normalTexture.value().textureIndex : -1;
+    material.occlusionIndex = gltfMaterial.occlusionTexture.has_value() ? gltfMaterial.occlusionTexture.value().textureIndex : -1;
+    material.emissiveIndex = gltfMaterial.emissiveTexture.has_value() ? gltfMaterial.emissiveTexture.value().textureIndex : -1;
+
+    material.albedoFactor = *reinterpret_cast<const glm::vec4*>(&gltfMaterial.pbrData.baseColorFactor);
+    material.metallicFactor = gltfMaterial.pbrData.metallicFactor;
+    material.roughnessFactor = gltfMaterial.pbrData.roughnessFactor;
+    material.normalScale = gltfMaterial.normalTexture.value().scale;
+    material.emissiveFactor = *reinterpret_cast<const glm::vec3*>(&gltfMaterial.emissiveFactor);
+
+    return material;
 }
 
 vk::PrimitiveTopology ModelLoader::MapGltfTopology(fastgltf::PrimitiveType gltfTopology)

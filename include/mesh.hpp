@@ -4,6 +4,7 @@
 #include <vulkan/vulkan.hpp>
 #include <glm/glm.hpp>
 #include "vk_mem_alloc.h"
+#include <memory>
 
 struct Vertex
 {
@@ -32,6 +33,8 @@ struct MeshPrimitive
     vk::IndexType indexType;
     std::vector<std::byte> indices;
     std::vector<Vertex> vertices;
+
+    uint32_t materialIndex;
 };
 
 struct Mesh
@@ -53,7 +56,7 @@ struct Texture
 struct Material
 {
     uint32_t albedoIndex;
-    glm::vec3 albedoFactor;
+    glm::vec4 albedoFactor;
     uint32_t albedoUVChannel;
 
     uint32_t metallicRoughnessIndex;
@@ -81,23 +84,6 @@ struct Model
     std::vector<Texture> textures;
 };
 
-struct MeshPrimitiveHandle
-{
-    vk::PrimitiveTopology topology;
-    vk::IndexType indexType;
-    uint32_t triangleCount;
-
-    vk::Buffer vertexBuffer;
-    vk::Buffer indexBuffer;
-    VmaAllocation vertexBufferAllocation;
-    VmaAllocation indexBufferAllocation;
-};
-
-struct MeshHandle
-{
-    std::vector<MeshPrimitiveHandle> primitives;
-};
-
 struct TextureHandle
 {
     std::string name;
@@ -108,9 +94,52 @@ struct TextureHandle
     vk::Format format;
 };
 
+struct MaterialHandle
+{
+    vk::DescriptorSet descriptorSet;
+    std::array<std::shared_ptr<TextureHandle>, 5> textures;
+
+    static std::array<vk::DescriptorSetLayoutBinding, 6> GetLayoutBindings()
+    {
+        std::array<vk::DescriptorSetLayoutBinding, 6> bindings{};
+        bindings[0].binding = 0;
+        bindings[0].descriptorType = vk::DescriptorType::eSampler;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags = vk::ShaderStageFlagBits::eFragment;
+        for(size_t i = 1; i < bindings.size(); ++i)
+        {
+            bindings[i].binding = i;
+            bindings[i].descriptorType = vk::DescriptorType::eSampledImage;
+            bindings[i].descriptorCount = 1;
+            bindings[i].stageFlags = vk::ShaderStageFlagBits::eFragment;
+        }
+
+        return bindings;
+    }
+};
+
+struct MeshPrimitiveHandle
+{
+    vk::PrimitiveTopology topology;
+    vk::IndexType indexType;
+    uint32_t triangleCount;
+
+    vk::Buffer vertexBuffer;
+    vk::Buffer indexBuffer;
+    VmaAllocation vertexBufferAllocation;
+    VmaAllocation indexBufferAllocation;
+
+    std::shared_ptr<MaterialHandle> material;
+};
+
+struct MeshHandle
+{
+    std::vector<MeshPrimitiveHandle> primitives;
+};
+
 struct ModelHandle
 {
     std::vector<MeshHandle> meshes;
-    std::vector<Material> materials;
-    std::vector<TextureHandle> textures;
+    std::vector<std::shared_ptr<MaterialHandle>> materials;
+    std::vector<std::shared_ptr<TextureHandle>> textures;
 };

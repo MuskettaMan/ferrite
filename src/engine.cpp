@@ -94,6 +94,7 @@ void Engine::Init(const InitInfo &initInfo, std::shared_ptr<Application> applica
 
 
     ModelLoader modelLoader;
+    //Model model = modelLoader.Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
     Model model = modelLoader.Load("assets/models/DamagedHelmet.glb");
     _model = LoadModel(model);
 
@@ -138,28 +139,12 @@ void Engine::Run()
         return;
     }
 
-    static std::vector<PerformanceTracker::FrameData> frameData;
-    frameData.clear();
-
-    static Stopwatch stopwatch{};
-    stopwatch.start();
-
     util::VK_ASSERT(_device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()),
                     "Failed waiting on in flight fence!");
-
-    stopwatch.stop();
-
-    frameData.emplace_back("Fence duration", stopwatch.elapsed_milliseconds());
-
-    stopwatch.start();
 
     uint32_t imageIndex;
     vk::Result result = _device.acquireNextImageKHR(_swapChain->GetSwapChain(), std::numeric_limits<uint64_t>::max(),
                                                     _imageAvailableSemaphores[_currentFrame], nullptr, &imageIndex);
-
-    stopwatch.stop();
-
-    frameData.emplace_back("Acquiring next image", stopwatch.elapsed_milliseconds());
 
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
     {
@@ -174,28 +159,17 @@ void Engine::Run()
 
     UpdateUniformData(_currentFrame);
 
-    stopwatch.start();
-
     ImGui_ImplVulkan_NewFrame();
     _newImGuiFrame();
     ImGui::NewFrame();
 
-    // ImGui stuff
     _performanceTracker.Render();
 
     ImGui::Render();
 
     _commandBuffers[_currentFrame].reset();
-    stopwatch.stop();
 
-    frameData.emplace_back("Rendering ImGui", stopwatch.elapsed_milliseconds());
-
-    stopwatch.start();
     RecordCommandBuffer(_commandBuffers[_currentFrame], imageIndex);
-    stopwatch.stop();
-
-    frameData.emplace_back("Recording command buffer", stopwatch.elapsed_milliseconds());
-
 
     vk::SubmitInfo submitInfo{};
     vk::Semaphore waitSemaphores[] = { _imageAvailableSemaphores[_currentFrame] };
@@ -210,11 +184,7 @@ void Engine::Run()
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    stopwatch.start();
     util::VK_ASSERT(_graphicsQueue.submit(1, &submitInfo, _inFlightFences[_currentFrame]), "Failed submitting to graphics queue!");
-    stopwatch.stop();
-    frameData.emplace_back("Submit to graphics queue", stopwatch.elapsed_milliseconds());
-
 
     vk::PresentInfoKHR presentInfo{};
     presentInfo.waitSemaphoreCount = 1;
@@ -225,16 +195,9 @@ void Engine::Run()
     presentInfo.pSwapchains = swapchains;
     presentInfo.pImageIndices = &imageIndex;
 
-    stopwatch.start();
     result = _presentQueue.presentKHR(&presentInfo);
-    stopwatch.stop();
 
-    frameData.emplace_back("Presenting", stopwatch.elapsed_milliseconds());
-
-    stopwatch.start();
     _device.waitIdle();
-    stopwatch.stop();
-    frameData.emplace_back("Wait idle", stopwatch.elapsed_milliseconds());
 
     if(result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || _swapChain->GetImageSize() != _application->DisplaySize())
     {
@@ -247,7 +210,7 @@ void Engine::Run()
 
     _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 
-    _performanceTracker.Update(frameData);
+    _performanceTracker.Update();
 }
 
 void Engine::Shutdown()
@@ -267,7 +230,6 @@ void Engine::Shutdown()
     if(_enableValidationLayers)
         _instance.destroyDebugUtilsMessengerEXT(_debugMessenger, nullptr, _dldi);
 
-
     for(auto& mesh : _model.meshes)
     {
         for(auto& primitive : mesh.primitives)
@@ -280,9 +242,9 @@ void Engine::Shutdown()
     }
     for(auto& texture : _model.textures)
     {
-        _device.destroy(texture.image);
-        _device.destroy(texture.imageView);
-        vmaFreeMemory(_vmaAllocator, texture.imageAllocation);
+        _device.destroy(texture->image);
+        _device.destroy(texture->imageView);
+        vmaFreeMemory(_vmaAllocator, texture->imageAllocation);
     }
 
     _swapChain.reset();
@@ -304,16 +266,17 @@ void Engine::Shutdown()
         vmaUnmapMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation);
         vmaFreeMemory(_vmaAllocator, _frameData[i].uniformBufferAllocation);
 
-        for(size_t j = 0; j < _frameData[i].deferredAttachments.size(); ++j)
+        _device.destroy(_frameData[i].gBuffersImageArray);
+        vmaFreeMemory(_vmaAllocator, _frameData[i].gBufferAllocation);
+        for(size_t j = 0; j < _frameData[i].gBufferViews.size(); ++j)
         {
-            _device.destroy(_frameData[i].deferredAttachments[j].image);
-            _device.destroy(_frameData[i].deferredAttachments[j].imageView);
-            vmaFreeMemory(_vmaAllocator, _frameData[i].deferredAttachments[j].imageAllocation);
+            _device.destroy(_frameData[i].gBufferViews[j]);
         }
     }
 
     _device.destroy(_geometryDescriptorSetLayout);
     _device.destroy(_lightingDescriptorSetLayout);
+    _device.destroy(_materialDescriptorSetLayout);
 
     vmaDestroyAllocator(_vmaAllocator);
 
@@ -546,8 +509,9 @@ void Engine::CreateDevice()
 void Engine::CreateGeometryPipeline()
 {
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &_geometryDescriptorSetLayout;
+    std::array<vk::DescriptorSetLayout, 2> layouts = { _geometryDescriptorSetLayout, _materialDescriptorSetLayout };
+    pipelineLayoutCreateInfo.setLayoutCount = layouts.size();
+    pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
     pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
@@ -623,7 +587,7 @@ void Engine::CreateGeometryPipeline()
     multisampleStateCreateInfo.alphaToCoverageEnable = vk::False;
     multisampleStateCreateInfo.alphaToOneEnable = vk::False;
 
-    std::array<vk::PipelineColorBlendAttachmentState, 3> colorBlendAttachmentStates{};
+    std::array<vk::PipelineColorBlendAttachmentState, FrameData::DEFERRED_ATTACHMENT_COUNT> colorBlendAttachmentStates{};
     for(auto& blendAttachmentState : colorBlendAttachmentStates)
     {
         blendAttachmentState.blendEnable = vk::False;
@@ -663,7 +627,8 @@ void Engine::CreateGeometryPipeline()
     geometryPipelineCreateInfo.basePipelineIndex = -1;
 
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
-    std::array<vk::Format, 3> formats{ vk::Format::eR16G16B16A16Sfloat, vk::Format::eR16G16B16A16Sfloat, vk::Format::eR16G16B16A16Sfloat };
+    std::array<vk::Format, FrameData::DEFERRED_ATTACHMENT_COUNT> formats{};
+    std::fill(formats.begin(), formats.end(), vk::Format::eR16G16B16A16Sfloat);
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = FrameData::DEFERRED_ATTACHMENT_COUNT;
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = formats.data();
     pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _swapChain->GetDepthFormat();
@@ -826,30 +791,20 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
 
-    for(auto& attachment : _frameData[_currentFrame].deferredAttachments)
-        util::TransitionImageLayout(commandBuffer, attachment.image, vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+    util::TransitionImageLayout(commandBuffer, _frameData[_currentFrame].gBuffersImageArray,
+                                vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
+                                FrameData::DEFERRED_ATTACHMENT_COUNT);
 
-    std::array<vk::RenderingAttachmentInfoKHR, 3> colorAttachmentInfos{};
-    vk::RenderingAttachmentInfoKHR& albedoAttachmentInfo{ colorAttachmentInfos[0] };
-    albedoAttachmentInfo.imageView = _frameData[_currentFrame].deferredAttachments[0].imageView;
-    albedoAttachmentInfo.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-    albedoAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
-    albedoAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
-    albedoAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
-
-    vk::RenderingAttachmentInfoKHR& normalAttachmentInfo{ colorAttachmentInfos[1] };
-    normalAttachmentInfo.imageView = _frameData[_currentFrame].deferredAttachments[1].imageView;
-    normalAttachmentInfo.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-    normalAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
-    normalAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
-    normalAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
-
-    vk::RenderingAttachmentInfoKHR& positionAttachmentInfo{ colorAttachmentInfos[2] };
-    positionAttachmentInfo.imageView = _frameData[_currentFrame].deferredAttachments[2].imageView;
-    positionAttachmentInfo.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-    positionAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
-    positionAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
-    positionAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<vk::RenderingAttachmentInfoKHR, FrameData::DEFERRED_ATTACHMENT_COUNT> colorAttachmentInfos{};
+    for(size_t i = 0; i < colorAttachmentInfos.size(); ++i)
+    {
+        vk::RenderingAttachmentInfoKHR& info{ colorAttachmentInfos[i] };
+        info.imageView = _frameData[_currentFrame].gBufferViews[i];
+        info.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+        info.storeOp = vk::AttachmentStoreOp::eStore;
+        info.loadOp = vk::AttachmentLoadOp::eClear;
+        info.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
+    }
 
     vk::RenderingAttachmentInfoKHR depthAttachmentInfo{};
     depthAttachmentInfo.imageView = _swapChain->GetDepthView();
@@ -873,7 +828,7 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     renderingInfo.pDepthAttachment = &depthAttachmentInfo;
     renderingInfo.pStencilAttachment = util::HasStencilComponent(_swapChain->GetDepthFormat()) ? &stencilAttachmentInfo : nullptr;
 
-    util::BeginLabel(commandBuffer, "Geometry pass", glm::vec3{ 1.0f, 0.0f, 0.0f }, _dldi);
+    util::BeginLabel(commandBuffer, "Geometry pass", glm::vec3{ 6.0f, 214.0f, 160.0f } / 255.0f, _dldi);
 
     commandBuffer.beginRenderingKHR(&renderingInfo, _dldi);
 
@@ -889,15 +844,14 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
             if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
                 throw std::runtime_error("No support for topology other than triangle list!");
 
-            if(!_model.textures.empty())
-                UpdateGeometryDescriptorSet(_currentFrame, _model.textures[0].imageView);
-
             vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
             vk::DeviceSize offsets[] = { 0 };
-            commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
-            commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
 
             commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 0, 1, &_frameData[_currentFrame].geometryDescriptorSet, 0, nullptr);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _geometryPipelineLayout, 1, 1, &primitive.material->descriptorSet, 0, nullptr);
+
+            commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+            commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
 
             commandBuffer.drawIndexed(primitive.triangleCount, 1, 0, 0, 0);
         }
@@ -908,8 +862,9 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     util::EndLabel(commandBuffer, _dldi);
 
 
-    for(auto& attachment : _frameData[_currentFrame].deferredAttachments)
-        util::TransitionImageLayout(commandBuffer, attachment.image, vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+    util::TransitionImageLayout(commandBuffer, _frameData[_currentFrame].gBuffersImageArray,
+                                vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+                                FrameData::DEFERRED_ATTACHMENT_COUNT);
 
     vk::RenderingAttachmentInfoKHR finalColorAttachmentInfo{};
     finalColorAttachmentInfo.imageView = _swapChain->GetImageView(swapChainImageIndex);
@@ -927,7 +882,7 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     renderingInfo.pDepthAttachment = nullptr;
     renderingInfo.pStencilAttachment = nullptr;
 
-    util::BeginLabel(commandBuffer, "Lighting pass", glm::vec3{ 1.0f, 0.0f, 0.0f }, _dldi);
+    util::BeginLabel(commandBuffer, "Lighting pass", glm::vec3{ 255.0f, 209.0f, 102.0f } / 255.0f, _dldi);
     commandBuffer.beginRenderingKHR(&renderingInfo, _dldi);
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _lightingPipeline);
@@ -1044,7 +999,7 @@ void Engine::CreateDescriptorSetLayout()
 {
     // Geometry
     {
-        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
+        std::array<vk::DescriptorSetLayoutBinding, 1> bindings{};
 
         vk::DescriptorSetLayoutBinding& descriptorSetLayoutBinding{bindings[0]};
         descriptorSetLayoutBinding.binding = 0;
@@ -1052,20 +1007,6 @@ void Engine::CreateDescriptorSetLayout()
         descriptorSetLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
         descriptorSetLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
         descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
-
-        vk::DescriptorSetLayoutBinding& samplerLayoutBinding{bindings[1]};
-        samplerLayoutBinding.binding = 1;
-        samplerLayoutBinding.descriptorCount = 1;
-        samplerLayoutBinding.descriptorType = vk::DescriptorType::eSampler;
-        samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-        samplerLayoutBinding.pImmutableSamplers = nullptr;
-
-        vk::DescriptorSetLayoutBinding& imageLayoutBinding{bindings[2]};
-        imageLayoutBinding.binding = 2;
-        imageLayoutBinding.descriptorCount = 1;
-        imageLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
-        imageLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-        imageLayoutBinding.pImmutableSamplers = nullptr;
 
         vk::DescriptorSetLayoutCreateInfo createInfo{};
         createInfo.bindingCount = bindings.size();
@@ -1077,7 +1018,7 @@ void Engine::CreateDescriptorSetLayout()
 
     // Lighting
     {
-        std::array<vk::DescriptorSetLayoutBinding, 4> bindings{};
+        std::array<vk::DescriptorSetLayoutBinding, FrameData::DEFERRED_ATTACHMENT_COUNT + 1> bindings{};
 
         vk::DescriptorSetLayoutBinding& samplerLayoutBinding{bindings[0]};
         samplerLayoutBinding.binding = 0;
@@ -1086,26 +1027,15 @@ void Engine::CreateDescriptorSetLayout()
         samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
         samplerLayoutBinding.pImmutableSamplers = nullptr;
 
-        vk::DescriptorSetLayoutBinding& albedoLayoutBinding{bindings[1]};
-        albedoLayoutBinding.binding = 1;
-        albedoLayoutBinding.descriptorCount = 1;
-        albedoLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
-        albedoLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-        albedoLayoutBinding.pImmutableSamplers = nullptr;
-
-        vk::DescriptorSetLayoutBinding& normalLayoutBinding{bindings[2]};
-        normalLayoutBinding.binding = 2;
-        normalLayoutBinding.descriptorCount = 1;
-        normalLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
-        normalLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-        normalLayoutBinding.pImmutableSamplers = nullptr;
-
-        vk::DescriptorSetLayoutBinding& positionLayoutBinding{bindings[3]};
-        positionLayoutBinding.binding = 3;
-        positionLayoutBinding.descriptorCount = 1;
-        positionLayoutBinding.descriptorType = vk::DescriptorType::eSampledImage;
-        positionLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-        positionLayoutBinding.pImmutableSamplers = nullptr;
+        for(size_t i = 1; i < bindings.size(); ++i)
+        {
+            vk::DescriptorSetLayoutBinding& binding{bindings[i]};
+            binding.binding = i;
+            binding.descriptorCount = 1;
+            binding.descriptorType = vk::DescriptorType::eSampledImage;
+            binding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+            binding.pImmutableSamplers = nullptr;
+        }
 
         vk::DescriptorSetLayoutCreateInfo createInfo{};
         createInfo.bindingCount = bindings.size();
@@ -1113,6 +1043,15 @@ void Engine::CreateDescriptorSetLayout()
 
         util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_lightingDescriptorSetLayout),
                         "Failed creating lighting descriptor set layout!");
+    }
+    // Material
+    {
+        auto layoutBindings = MaterialHandle::GetLayoutBindings();
+        vk::DescriptorSetLayoutCreateInfo createInfo{};
+        createInfo.bindingCount = layoutBindings.size();
+        createInfo.pBindings = layoutBindings.data();
+        util::VK_ASSERT(_device.createDescriptorSetLayout(&createInfo, nullptr, &_materialDescriptorSetLayout),
+                        "Failed creating material descriptor set layout!");
     }
 }
 
@@ -1135,7 +1074,7 @@ void Engine::CreateDescriptorPool()
     vk::DescriptorPoolCreateInfo createInfo{};
     createInfo.poolSizeCount = poolSizes.size();
     createInfo.pPoolSizes = poolSizes.data();
-    createInfo.maxSets = MAX_FRAMES_IN_FLIGHT * 2 + 1;
+    createInfo.maxSets = MAX_FRAMES_IN_FLIGHT * 2 + 1 + 1;
     createInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
     util::VK_ASSERT(_device.createDescriptorPool(&createInfo, nullptr, &_descriptorPool), "Failed creating descriptor pool!");
 }
@@ -1176,9 +1115,7 @@ void Engine::CreateDescriptorSets()
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        if(!_model.textures.empty())
-            UpdateGeometryDescriptorSet(i, _model.textures[0].imageView);
-
+        UpdateGeometryDescriptorSet(i);
         UpdateLightingDescriptorSet(i);
     }
 }
@@ -1194,9 +1131,8 @@ void Engine::CreateTextureImage(const Texture& texture, TextureHandle& textureHa
 
     vmaCopyMemoryToAllocation(_vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
 
-    util::CreateImage(_device, _vmaAllocator, texture.width, texture.height, format,
-                      vk::ImageTiling::eOptimal,
-                      vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+    util::CreateImage(_vmaAllocator, texture.width, texture.height, format,
+                      vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
                       textureHandle.image, textureHandle.imageAllocation);
 
     vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_device, _commandPool);
@@ -1258,21 +1194,14 @@ void Engine::CreateTextureSampler()
     util::VK_ASSERT(_device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
 }
 
-void Engine::UpdateGeometryDescriptorSet(uint32_t frameIndex, vk::ImageView texture)
+void Engine::UpdateGeometryDescriptorSet(uint32_t frameIndex)
 {
     vk::DescriptorBufferInfo bufferInfo{};
     bufferInfo.buffer = _frameData[frameIndex].uniformBuffer;
     bufferInfo.offset = 0;
     bufferInfo.range = sizeof(UBO);
 
-    vk::DescriptorImageInfo samplerInfo{};
-    samplerInfo.sampler = _sampler;
-
-    vk::DescriptorImageInfo imageInfo{};
-    imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    imageInfo.imageView = texture;
-
-    std::array<vk::WriteDescriptorSet, 3> descriptorWrites{};
+    std::array<vk::WriteDescriptorSet, 1> descriptorWrites{};
 
     vk::WriteDescriptorSet& bufferWrite{ descriptorWrites[0] };
     bufferWrite.dstSet = _frameData[frameIndex].geometryDescriptorSet;
@@ -1282,22 +1211,6 @@ void Engine::UpdateGeometryDescriptorSet(uint32_t frameIndex, vk::ImageView text
     bufferWrite.descriptorCount = 1;
     bufferWrite.pBufferInfo = &bufferInfo;
 
-    vk::WriteDescriptorSet& samplerWrite{ descriptorWrites[1] };
-    samplerWrite.dstSet = _frameData[frameIndex].geometryDescriptorSet;
-    samplerWrite.dstBinding = 1;
-    samplerWrite.dstArrayElement = 0;
-    samplerWrite.descriptorType = vk::DescriptorType::eSampler;
-    samplerWrite.descriptorCount = 1;
-    samplerWrite.pImageInfo = &samplerInfo;
-
-    vk::WriteDescriptorSet& imageWrite{ descriptorWrites[2] };
-    imageWrite.dstSet = _frameData[frameIndex].geometryDescriptorSet;
-    imageWrite.dstBinding = 2;
-    imageWrite.dstArrayElement = 0;
-    imageWrite.descriptorType = vk::DescriptorType::eSampledImage;
-    imageWrite.descriptorCount = 1;
-    imageWrite.pImageInfo = &imageInfo;
-
     _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }
 
@@ -1306,16 +1219,14 @@ void Engine::UpdateLightingDescriptorSet(uint32_t frameIndex)
     vk::DescriptorImageInfo samplerInfo{};
     samplerInfo.sampler = _sampler;
 
-    std::array<vk::DescriptorImageInfo, 3> imageInfo{};
-    imageInfo[0].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    imageInfo[0].imageView = _frameData[frameIndex].deferredAttachments[0].imageView;
-    imageInfo[1].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    imageInfo[1].imageView = _frameData[frameIndex].deferredAttachments[1].imageView;
-    imageInfo[2].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    imageInfo[2].imageView = _frameData[frameIndex].deferredAttachments[2].imageView;
+    std::array<vk::DescriptorImageInfo, FrameData::DEFERRED_ATTACHMENT_COUNT> imageInfo{};
+    for(size_t i = 0; i < imageInfo.size(); ++i)
+    {
+        imageInfo[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        imageInfo[i].imageView = _frameData[frameIndex].gBufferViews[i];
+    }
 
-    std::array<vk::WriteDescriptorSet, 4> descriptorWrites{};
-
+    std::array<vk::WriteDescriptorSet, FrameData::DEFERRED_ATTACHMENT_COUNT + 1> descriptorWrites{};
     descriptorWrites[0].dstSet = _frameData[frameIndex].lightingDescriptorSet;
     descriptorWrites[0].dstBinding = 0;
     descriptorWrites[0].dstArrayElement = 0;
@@ -1323,26 +1234,15 @@ void Engine::UpdateLightingDescriptorSet(uint32_t frameIndex)
     descriptorWrites[0].descriptorCount = 1;
     descriptorWrites[0].pImageInfo = &samplerInfo;
 
-    descriptorWrites[1].dstSet = _frameData[frameIndex].lightingDescriptorSet;
-    descriptorWrites[1].dstBinding = 1;
-    descriptorWrites[1].dstArrayElement = 0;
-    descriptorWrites[1].descriptorType = vk::DescriptorType::eSampledImage;
-    descriptorWrites[1].descriptorCount = 1;
-    descriptorWrites[1].pImageInfo = &imageInfo[0];
-
-    descriptorWrites[2].dstSet = _frameData[frameIndex].lightingDescriptorSet;
-    descriptorWrites[2].dstBinding = 2;
-    descriptorWrites[2].dstArrayElement = 0;
-    descriptorWrites[2].descriptorType = vk::DescriptorType::eSampledImage;
-    descriptorWrites[2].descriptorCount = 1;
-    descriptorWrites[2].pImageInfo = &imageInfo[1];
-
-    descriptorWrites[3].dstSet = _frameData[frameIndex].lightingDescriptorSet;
-    descriptorWrites[3].dstBinding = 3;
-    descriptorWrites[3].dstArrayElement = 0;
-    descriptorWrites[3].descriptorType = vk::DescriptorType::eSampledImage;
-    descriptorWrites[3].descriptorCount = 1;
-    descriptorWrites[3].pImageInfo = &imageInfo[2];
+    for(size_t i = 1; i < descriptorWrites.size(); ++i)
+    {
+        descriptorWrites[i].dstSet = _frameData[frameIndex].lightingDescriptorSet;
+        descriptorWrites[i].dstBinding = i;
+        descriptorWrites[i].dstArrayElement = 0;
+        descriptorWrites[i].descriptorType = vk::DescriptorType::eSampledImage;
+        descriptorWrites[i].descriptorCount = 1;
+        descriptorWrites[i].pImageInfo = &imageInfo[i - 1];
+    }
 
     _device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }
@@ -1352,6 +1252,65 @@ ModelHandle Engine::LoadModel(const Model& model)
 {
     ModelHandle modelHandle{};
 
+    // Load textures
+    for(const auto& texture : model.textures)
+    {
+        TextureHandle textureHandle{};
+        textureHandle.format = texture.GetFormat();
+        textureHandle.width = texture.width;
+        textureHandle.height = texture.height;
+        textureHandle.numChannels = texture.numChannels;
+
+        CreateTextureImage(texture, textureHandle, textureHandle.format);
+        textureHandle.imageView = util::CreateImageView(_device, textureHandle.image, texture.GetFormat(), vk::ImageAspectFlagBits::eColor);
+
+        modelHandle.textures.emplace_back(std::make_shared<TextureHandle>(textureHandle));
+    }
+
+    // Load materials
+    for(const auto& material : model.materials)
+    {
+        MaterialHandle materialHandle;
+        materialHandle.textures[0] = modelHandle.textures[material.albedoIndex];
+        materialHandle.textures[1] = modelHandle.textures[material.metallicRoughnessIndex];
+        materialHandle.textures[2] = modelHandle.textures[material.normalIndex];
+        materialHandle.textures[3] = modelHandle.textures[material.occlusionIndex];
+        materialHandle.textures[4] = modelHandle.textures[material.emissiveIndex];
+
+        vk::DescriptorSetAllocateInfo allocateInfo{};
+        allocateInfo.descriptorPool = _descriptorPool;
+        allocateInfo.descriptorSetCount = 1;
+        allocateInfo.pSetLayouts = &_materialDescriptorSetLayout;
+
+        util::VK_ASSERT(_device.allocateDescriptorSets(&allocateInfo, &materialHandle.descriptorSet),
+                        "Failed allocating material descriptor set!");
+
+        std::array<vk::DescriptorImageInfo, 6> imageInfos;
+        imageInfos[0].sampler = _sampler;
+        for(size_t i = 1; i < imageInfos.size(); ++i)
+        {
+            imageInfos[i].imageView = materialHandle.textures[i - 1]->imageView;
+            imageInfos[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        }
+
+        std::array<vk::WriteDescriptorSet, imageInfos.size()> writes;
+        for(size_t i = 0; i < writes.size(); ++i)
+        {
+            writes[i].dstSet = materialHandle.descriptorSet;
+            writes[i].dstBinding = i;
+            writes[i].dstArrayElement = 0;
+            // Hacky way of keeping this process in one loop.
+            writes[i].descriptorType = i == 0 ? vk::DescriptorType::eSampler : vk::DescriptorType::eSampledImage;
+            writes[i].descriptorCount = 1;
+            writes[i].pImageInfo = &imageInfos[i];
+        }
+
+        _device.updateDescriptorSets(writes.size(), writes.data(), 0, nullptr);
+
+        modelHandle.materials.emplace_back(std::make_shared<MaterialHandle>(materialHandle));
+    }
+
+    // Load meshes
     for(const auto& mesh : model.meshes)
     {
         MeshHandle meshHandle{};
@@ -1359,6 +1318,7 @@ ModelHandle Engine::LoadModel(const Model& model)
         for(const auto& primitive : mesh.primitives)
         {
             MeshPrimitiveHandle primitiveHandle{};
+            primitiveHandle.material = modelHandle.materials[primitive.materialIndex];
             primitiveHandle.topology = primitive.topology;
             primitiveHandle.indexType = primitive.indexType;
             primitiveHandle.triangleCount = primitive.indices.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
@@ -1372,20 +1332,6 @@ ModelHandle Engine::LoadModel(const Model& model)
         modelHandle.meshes.emplace_back(meshHandle);
     }
 
-    for(const auto& texture : model.textures)
-    {
-        TextureHandle textureHandle{};
-        textureHandle.format = texture.GetFormat();
-        textureHandle.width = texture.width;
-        textureHandle.height = texture.height;
-        textureHandle.numChannels = texture.numChannels;
-
-        CreateTextureImage(texture, textureHandle, textureHandle.format);
-        textureHandle.imageView = util::CreateImageView(_device, textureHandle.image, texture.GetFormat(), vk::ImageAspectFlagBits::eColor);
-
-        modelHandle.textures.emplace_back(textureHandle);
-    }
-
     return modelHandle;
 }
 
@@ -1394,29 +1340,27 @@ void Engine::InitializeDeferredRTs()
     vk::Format format = vk::Format::eR16G16B16A16Sfloat;
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
-        _frameData[i].deferredAttachments[0].name = "Albedo GBuffer";
-        _frameData[i].deferredAttachments[1].name = "Normal GBuffer";
-        _frameData[i].deferredAttachments[2].name = "Position GBuffer";
+        uint32_t width = _swapChain->GetImageSize().x;
+        uint32_t height = _swapChain->GetImageSize().y;
+        util::CreateImage(_vmaAllocator, width, height, format,
+                          vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+                          _frameData[i].gBuffersImageArray, _frameData[i].gBufferAllocation, FrameData::DEFERRED_ATTACHMENT_COUNT);
+        util::NameObject(_frameData[i].gBuffersImageArray, "[IMAGE] GBuffer Array", _device, _dldi);
 
-        for(auto& attachment : _frameData[i].deferredAttachments)
+        for(size_t j = 0; j < FrameData::DEFERRED_ATTACHMENT_COUNT; ++j)
         {
-            Texture texture;
-            texture.width = _swapChain->GetImageSize().x;
-            texture.height = _swapChain->GetImageSize().y;
-            texture.numChannels = 4;
-            util::CreateImage(_device, _vmaAllocator,
-                              texture.width, texture.height,
-                              format,
-                              vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-                              attachment.image, attachment.imageAllocation);
-            attachment.imageView = util::CreateImageView(_device, attachment.image, format, vk::ImageAspectFlagBits::eColor);
+            _frameData[i].gBufferViews[j] = util::CreateImageView(_device, _frameData[i].gBuffersImageArray, format, vk::ImageAspectFlagBits::eColor, j);
+            std::string name = "[VIEW] GBuffer ";
+            if(i == 0) name = "RGB: Albedo A: Metallic";
+            else if(i == 1) name = "RGB: Normal A: Roughness";
+            else if(i == 2) name = "RGB: Emissive A: AO";
+            else if(i == 3) name = "RGB: Position A: Unused";
 
-            util::NameObject(attachment.image, "[IMAGE] " + attachment.name, _device, _dldi);
-            util::NameObject(attachment.imageView, "[IMAGE VIEW] " + attachment.name, _device, _dldi);
-
-            vk::CommandBuffer cb = util::BeginSingleTimeCommands(_device, _commandPool);
-            util::TransitionImageLayout(cb, attachment.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
-            util::EndSingleTimeCommands(_device, _graphicsQueue, cb, _commandPool);
+            util::NameObject(_frameData[i].gBufferViews[j], name, _device, _dldi);
         }
+
+        vk::CommandBuffer cb = util::BeginSingleTimeCommands(_device, _commandPool);
+        util::TransitionImageLayout(cb, _frameData[i].gBuffersImageArray, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, FrameData::DEFERRED_ATTACHMENT_COUNT);
+        util::EndSingleTimeCommands(_device, _graphicsQueue, cb, _commandPool);
     }
 }

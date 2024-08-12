@@ -53,7 +53,7 @@ namespace util
         return std::nullopt;
     }
 
-    static vk::ImageView CreateImageView(vk::Device device, vk::Image image, vk::Format format, vk::ImageAspectFlags aspectFlags)
+    static vk::ImageView CreateImageView(vk::Device device, vk::Image image, vk::Format format, vk::ImageAspectFlags aspectFlags, uint32_t layer = 0)
     {
         vk::ImageViewCreateInfo createInfo{};
         createInfo.image = image;
@@ -62,7 +62,7 @@ namespace util
         createInfo.subresourceRange.aspectMask = aspectFlags;
         createInfo.subresourceRange.baseMipLevel = 0;
         createInfo.subresourceRange.levelCount = 1;
-        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.baseArrayLayer = layer;
         createInfo.subresourceRange.layerCount = 1;
 
         vk::ImageView view;
@@ -83,7 +83,7 @@ namespace util
         throw std::runtime_error("Failed finding suitable memory type!");
     }
 
-    static void CreateImage(vk::Device device, VmaAllocator allocator, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::Image& image, VmaAllocation& allocation)
+    static void CreateImage(VmaAllocator allocator, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::Image& image, VmaAllocation& allocation, uint32_t numLayers = 1)
     {
         vk::ImageCreateInfo createInfo{};
         createInfo.imageType = vk::ImageType::e2D;
@@ -91,7 +91,7 @@ namespace util
         createInfo.extent.height = height;
         createInfo.extent.depth = 1;
         createInfo.mipLevels = 1;
-        createInfo.arrayLayers = 1;
+        createInfo.arrayLayers = numLayers;
         createInfo.format = format;
         createInfo.tiling = tiling;
         createInfo.initialLayout = vk::ImageLayout::eUndefined;
@@ -138,7 +138,7 @@ namespace util
         device.free(commandPool, commandBuffer);
     }
 
-    static void TransitionImageLayout(vk::CommandBuffer commandBuffer, vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout)
+    static void TransitionImageLayout(vk::CommandBuffer commandBuffer, vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t numLayers = 1)
     {
         vk::ImageMemoryBarrier barrier{};
         barrier.oldLayout = oldLayout;
@@ -150,7 +150,7 @@ namespace util
         barrier.subresourceRange.baseMipLevel = 0;
         barrier.subresourceRange.levelCount = 1;
         barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
+        barrier.subresourceRange.layerCount = numLayers;
 
         vk::PipelineStageFlags sourceStage;
         vk::PipelineStageFlags destinationStage;

@@ -9,14 +9,8 @@
 class PerformanceTracker
 {
 public:
-    struct FrameData
-    {
-        std::string label;
-        float value;
-    };
-
     PerformanceTracker();
-    void Update(const std::vector<FrameData>& frameData);
+    void Update();
     void Render();
 
 private:
@@ -27,7 +21,6 @@ private:
 
     std::vector<float> _frameDurations;
     std::vector<std::string> _labels;
-    std::vector<std::vector<float>> _stageDurations;
 
     std::vector<float> _timePoints;
     std::chrono::steady_clock::time_point _lastFrameTime;

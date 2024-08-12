@@ -33,7 +33,7 @@ struct UBO
 
 struct FrameData
 {
-    const static uint32_t DEFERRED_ATTACHMENT_COUNT = 3;
+    const static uint32_t DEFERRED_ATTACHMENT_COUNT = 4;
 
     vk::Buffer uniformBuffer;
     VmaAllocation uniformBufferAllocation;
@@ -41,8 +41,9 @@ struct FrameData
     vk::DescriptorSet geometryDescriptorSet;
     vk::DescriptorSet lightingDescriptorSet;
 
-    std::array<TextureHandle, DEFERRED_ATTACHMENT_COUNT> deferredAttachments;
-
+    vk::Image gBuffersImageArray;
+    VmaAllocation gBufferAllocation;
+    std::array<vk::ImageView, DEFERRED_ATTACHMENT_COUNT> gBufferViews;
 };
 
 class Engine
@@ -69,6 +70,7 @@ private:
     vk::DescriptorPool _descriptorPool;
     vk::DescriptorSetLayout _geometryDescriptorSetLayout;
     vk::DescriptorSetLayout _lightingDescriptorSetLayout;
+    vk::DescriptorSetLayout _materialDescriptorSetLayout;
     vk::CommandPool _commandPool;
     std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> _commandBuffers;
     vk::Viewport _viewport;
@@ -157,7 +159,7 @@ private:
     void CreateTextureSampler();
     void CreateDescriptorPool();
     void CreateDescriptorSets();
-    void UpdateGeometryDescriptorSet(uint32_t frameIndex, vk::ImageView texture);
+    void UpdateGeometryDescriptorSet(uint32_t frameIndex);
     void UpdateLightingDescriptorSet(uint32_t frameIndex);
     ModelHandle LoadModel(const Model& model);
 
