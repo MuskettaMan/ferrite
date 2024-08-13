@@ -1,13 +1,12 @@
+#include "engine.hpp"
+
 #if defined(WINDOWS)
 #include "win/win_app.hpp"
 #elif defined(LINUX)
 #include "linux/linux_app.hpp"
 #endif
 
-// THIS FILE SHOULD ALWAYS BE AFTER THE IMPLEMENTATIONS ABOVE ^
-#include "include.hpp"
-
-#include "engine.hpp"
+#include <memory>
 
 std::shared_ptr<Application> g_app;
 std::unique_ptr<Engine> g_engine;

@@ -1,5 +1,7 @@
 #include "pipelines/lighting_pipeline.hpp"
 #include "shaders/shader_loader.hpp"
+#include "imgui.h"
+#include "imgui_impl_vulkan.h"
 
 
 LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const SwapChain& swapChain) :
@@ -7,7 +9,7 @@ LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBu
     _gBuffers(gBuffers),
     _swapChain(swapChain)
 {
-    CreateSampler();
+    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear);
     CreateDescriptorSetLayout();
     CreateDescriptorSets();
     CreatePipeline();
@@ -41,6 +43,8 @@ void LightingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
     // Fullscreen quad.
     commandBuffer.draw(3, 1, 0, 0);
 
+    // TODO: Place more accordingly later.
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
     commandBuffer.endRenderingKHR(_brain.dldi);
     util::EndLabel(commandBuffer, _brain.dldi);
@@ -52,6 +56,7 @@ LightingPipeline::~LightingPipeline()
     _brain.device.destroy(_pipelineLayout);
 
     _brain.device.destroy(_descriptorSetLayout);
+    _brain.device.destroy(_sampler);
 }
 
 void LightingPipeline::CreatePipeline()
@@ -215,31 +220,6 @@ void LightingPipeline::CreateDescriptorSets()
         _frameData[i].descriptorSet = descriptorSets[i];
 
     UpdateGBufferViews();
-}
-
-void LightingPipeline::CreateSampler()
-{
-    vk::PhysicalDeviceProperties properties{};
-    _brain.physicalDevice.getProperties(&properties);
-
-    vk::SamplerCreateInfo createInfo{};
-    createInfo.magFilter = vk::Filter::eLinear;
-    createInfo.minFilter = vk::Filter::eLinear;
-    createInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
-    createInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
-    createInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
-    createInfo.anisotropyEnable = vk::True;
-    createInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-    createInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
-    createInfo.unnormalizedCoordinates = vk::False;
-    createInfo.compareEnable = vk::False;
-    createInfo.compareOp = vk::CompareOp::eAlways;
-    createInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
-    createInfo.mipLodBias = 0.0f;
-    createInfo.minLod = 0.0f;
-    createInfo.maxLod = 0.0f;
-
-    util::VK_ASSERT(_brain.device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
 }
 
 void LightingPipeline::UpdateGBufferViews()

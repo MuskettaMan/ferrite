@@ -37,6 +37,7 @@ public:
     vk::DispatchLoaderDynamic dldi;
     VmaAllocator vmaAllocator;
     QueueFamilyIndices queueFamilyIndices;
+    uint32_t minUniformBufferOffsetAlignment;
 
 private:
     vk::DebugUtilsMessengerEXT _debugMessenger;

@@ -28,6 +28,10 @@ VulkanBrain::VulkanBrain(const InitInfo& initInfo)
     vmaAllocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
     vmaAllocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
     vmaCreateAllocator(&vmaAllocatorCreateInfo, &vmaAllocator);
+
+    vk::PhysicalDeviceProperties properties;
+    physicalDevice.getProperties(&properties);
+    minUniformBufferOffsetAlignment = properties.limits.minUniformBufferOffsetAlignment;
 }
 
 VulkanBrain::~VulkanBrain()

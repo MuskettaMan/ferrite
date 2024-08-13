@@ -1,6 +1,9 @@
 #include "pipelines/geometry_pipeline.hpp"
 #include "shaders/shader_loader.hpp"
 
+VkDeviceSize align(VkDeviceSize value, VkDeviceSize alignment) {
+    return (value + alignment - 1) & ~(alignment - 1);
+}
 
 GeometryPipeline::GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, vk::DescriptorSetLayout materialDescriptorSetLayout) :
     _brain(brain),
@@ -10,6 +13,8 @@ GeometryPipeline::GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBu
     CreateUniformBuffers();
     CreateDescriptorSets();
     CreatePipeline(materialDescriptorSetLayout);
+
+    spdlog::info("ubo size: {}, minUniformSize: {}, aligned size: {}", sizeof(UBO), _brain.minUniformBufferOffsetAlignment, align(sizeof(UBO), _brain.minUniformBufferOffsetAlignment));
 }
 
 GeometryPipeline::~GeometryPipeline()
@@ -26,8 +31,6 @@ GeometryPipeline::~GeometryPipeline()
 
 void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, const ModelHandle& model)
 {
-    UpdateUniformData(currentFrame);
-
     std::array<vk::RenderingAttachmentInfoKHR, DEFERRED_ATTACHMENT_COUNT> colorAttachmentInfos{};
     for(size_t i = 0; i < colorAttachmentInfos.size(); ++i)
     {
@@ -70,28 +73,37 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
     commandBuffer.setViewport(0, 1, &_gBuffers.Viewport());
     commandBuffer.setScissor(0, 1, &_gBuffers.Scissor());
 
-    for(auto& mesh : model.meshes)
+    std::vector<glm::mat4> transforms;
+    transforms.reserve(model.hierarchy.allNodes.size());
+    for(auto& node : model.hierarchy.allNodes)
     {
-        for(auto& primitive : mesh.primitives)
+        transforms.emplace_back(node.transform);
+    }
+    UpdateUniformData(currentFrame, transforms);
+
+    for(size_t i = 0; i < model.hierarchy.allNodes.size(); ++i)
+    {
+        const auto& node = model.hierarchy.allNodes[i];
+
+        for(const auto& primitive : node.mesh->primitives)
         {
             if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
                 throw std::runtime_error("No support for topology other than triangle list!");
 
-            // TODO: Add back default materials. (Although only relevant for vertex color models, so maybe just drop it)
-            //const MaterialHandle& material = primitive.material != nullptr ? *primitive.material : _defaultMaterial;
             assert(primitive.material && "There should always be a material available.");
             const MaterialHandle& material = *primitive.material;
 
-            vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
-            vk::DeviceSize offsets[] = { 0 };
+            uint32_t dynamicOffset = static_cast<uint32_t>(i * sizeof(UBO));
 
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 0, nullptr);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 1, &dynamicOffset);
             commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &material.descriptorSet, 0, nullptr);
 
+            vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
+            vk::DeviceSize offsets[] = { 0 };
             commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
             commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
 
-            commandBuffer.drawIndexed(primitive.triangleCount, 1, 0, 0, 0);
+            commandBuffer.drawIndexed(primitive.indexCount, 1, 0, 0, 0);
         }
     }
 
@@ -103,7 +115,7 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
 void GeometryPipeline::CreatePipeline(vk::DescriptorSetLayout materialDescriptorSetLayout)
 {
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    std::array<vk::DescriptorSetLayout, 2> layouts = {_descriptorSetLayout, materialDescriptorSetLayout };
+    std::array<vk::DescriptorSetLayout, 2> layouts = { _descriptorSetLayout, materialDescriptorSetLayout };
     pipelineLayoutCreateInfo.setLayoutCount = layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
@@ -240,7 +252,7 @@ void GeometryPipeline::CreateDescriptorSetLayout()
     vk::DescriptorSetLayoutBinding& descriptorSetLayoutBinding{bindings[0]};
     descriptorSetLayoutBinding.binding = 0;
     descriptorSetLayoutBinding.descriptorCount = 1;
-    descriptorSetLayoutBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+    descriptorSetLayoutBinding.descriptorType = vk::DescriptorType::eUniformBufferDynamic;
     descriptorSetLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
     descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
@@ -286,7 +298,7 @@ void GeometryPipeline::UpdateGeometryDescriptorSet(uint32_t frameIndex)
     bufferWrite.dstSet = _frameData[frameIndex].descriptorSet;
     bufferWrite.dstBinding = 0;
     bufferWrite.dstArrayElement = 0;
-    bufferWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+    bufferWrite.descriptorType = vk::DescriptorType::eUniformBufferDynamic;
     bufferWrite.descriptorCount = 1;
     bufferWrite.pBufferInfo = &bufferInfo;
 
@@ -295,7 +307,7 @@ void GeometryPipeline::UpdateGeometryDescriptorSet(uint32_t frameIndex)
 
 void GeometryPipeline::CreateUniformBuffers()
 {
-    vk::DeviceSize bufferSize = sizeof(UBO);
+    vk::DeviceSize bufferSize = sizeof(UBO) * MAX_MESHES;
 
     for(size_t i = 0; i < _frameData.size(); ++i)
     {
@@ -308,18 +320,24 @@ void GeometryPipeline::CreateUniformBuffers()
     }
 }
 
-void GeometryPipeline::UpdateUniformData(uint32_t currentFrame)
+void GeometryPipeline::UpdateUniformData(uint32_t currentFrame, const std::vector<glm::mat4> transforms)
 {
     static auto startTime = std::chrono::high_resolution_clock::now();
 
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-    UBO ubo{};
-    ubo.model = glm::rotate(glm::mat4{1.0f}, time * glm::radians(90.0f), glm::vec3{0.0f, 1.0f, 0.0f});
-    ubo.view = glm::lookAt(glm::vec3{0.7f}, glm::vec3{0.0f}, glm::vec3{0.0f, 1.0f, 0.0f});
-    ubo.proj = glm::perspective(glm::radians(45.0f), _gBuffers.Size().x / static_cast<float>(_gBuffers.Size().y), 0.01f, 100.0f);
-    ubo.proj[1][1] *= -1;
+    glm::mat4 view = glm::lookAt(glm::vec3{sinf(time), 0.7f, cosf(time)}, glm::vec3{0.0f}, glm::vec3{0.0f, 1.0f, 0.0f});;
+    glm::mat4 proj = glm::perspective(glm::radians(45.0f), _gBuffers.Size().x / static_cast<float>(_gBuffers.Size().y), 0.01f, 100.0f);
+    proj[1][1] *= -1;
 
-    memcpy(_frameData[currentFrame].uniformBufferMapped, &ubo, sizeof(ubo));
+    std::array<UBO, MAX_MESHES> ubos;
+    for(size_t i = 0; i < std::min(transforms.size(), ubos.size()); ++i)
+    {
+        ubos[i].model = transforms[i];
+        ubos[i].view = view;
+        ubos[i].proj = proj;
+    }
+
+    memcpy(_frameData[currentFrame].uniformBufferMapped, ubos.data(), ubos.size() * sizeof(UBO));
 }

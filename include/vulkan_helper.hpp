@@ -1,5 +1,6 @@
 #pragma once
 
+#include "include.hpp"
 #include <vulkan/vulkan.hpp>
 #include <magic_enum.hpp>
 #include <string>
@@ -8,6 +9,8 @@
 #include "spdlog/spdlog.h"
 #include "vk_mem_alloc.h"
 #include "vulkan_brain.hpp"
+#include "mesh.hpp"
+
 
 namespace util
 {
@@ -190,6 +193,92 @@ namespace util
         vmaFreeMemory(brain.vmaAllocator, stagingBufferAllocation);
     }
 
+    static MaterialHandle CreateMaterial(const VulkanBrain& brain, const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info, vk::Sampler sampler, vk::DescriptorSetLayout materialLayout, MaterialHandle* defaultMaterial = nullptr)
+    {
+        MaterialHandle materialHandle;
+        materialHandle.textures = textures;
+
+        util::CreateBuffer(brain, sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation, "Material uniform buffer");
+
+        void* uniformPtr;
+        util::VK_ASSERT(vmaMapMemory(brain.vmaAllocator, materialHandle.materialUniformAllocation, &uniformPtr), "Failed mapping memory for material UBO!");
+        std::memcpy(uniformPtr, &info, sizeof(info));
+        vmaUnmapMemory(brain.vmaAllocator, materialHandle.materialUniformAllocation);
+
+
+        vk::DescriptorSetAllocateInfo allocateInfo{};
+        allocateInfo.descriptorPool = brain.descriptorPool;
+        allocateInfo.descriptorSetCount = 1;
+        allocateInfo.pSetLayouts = &materialLayout;
+
+        util::VK_ASSERT(brain.device.allocateDescriptorSets(&allocateInfo, &materialHandle.descriptorSet),
+                        "Failed allocating material descriptor set!");
+
+        std::array<vk::DescriptorImageInfo, 6> imageInfos;
+        imageInfos[0].sampler = sampler;
+        for(size_t i = 1; i < MaterialHandle::TEXTURE_COUNT + 1; ++i)
+        {
+            const MaterialHandle& material = textures[i - 1] != nullptr ? materialHandle : *defaultMaterial;
+
+            imageInfos[i].imageView = material.textures[i - 1]->imageView;
+            imageInfos[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        }
+
+        vk::DescriptorBufferInfo uniformInfo{};
+        uniformInfo.offset = 0;
+        uniformInfo.buffer = materialHandle.materialUniformBuffer;
+        uniformInfo.range = sizeof(MaterialHandle::MaterialInfo);
+
+        std::array<vk::WriteDescriptorSet, imageInfos.size() + 1> writes;
+        for(size_t i = 0; i < imageInfos.size(); ++i)
+        {
+            writes[i].dstSet = materialHandle.descriptorSet;
+            writes[i].dstBinding = i;
+            writes[i].dstArrayElement = 0;
+            // Hacky way of keeping this process in one loop.
+            writes[i].descriptorType = i == 0 ? vk::DescriptorType::eSampler : vk::DescriptorType::eSampledImage;
+            writes[i].descriptorCount = 1;
+            writes[i].pImageInfo = &imageInfos[i];
+        }
+        writes[imageInfos.size()].dstSet = materialHandle.descriptorSet;
+        writes[imageInfos.size()].dstBinding = imageInfos.size();
+        writes[imageInfos.size()].dstArrayElement = 0;
+        writes[imageInfos.size()].descriptorType = vk::DescriptorType::eUniformBuffer;
+        writes[imageInfos.size()].descriptorCount = 1;
+        writes[imageInfos.size()].pBufferInfo = &uniformInfo;
+
+        brain.device.updateDescriptorSets(writes.size(), writes.data(), 0, nullptr);
+
+        return materialHandle;
+    }
+
+    static vk::Sampler CreateSampler(const VulkanBrain& brain, vk::Filter min, vk::Filter mag, vk::SamplerAddressMode addressingMode, vk::SamplerMipmapMode mipmapMode)
+    {
+        vk::PhysicalDeviceProperties properties{};
+        brain.physicalDevice.getProperties(&properties);
+
+        vk::SamplerCreateInfo createInfo{};
+        createInfo.magFilter = mag;
+        createInfo.minFilter = min;
+        createInfo.addressModeU = addressingMode;
+        createInfo.addressModeV = addressingMode;
+        createInfo.addressModeW = addressingMode;
+        createInfo.anisotropyEnable = 1;
+        createInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+        createInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+        createInfo.unnormalizedCoordinates = 0;
+        createInfo.compareEnable = 0;
+        createInfo.compareOp = vk::CompareOp::eAlways;
+        createInfo.mipmapMode = mipmapMode;
+        createInfo.mipLodBias = 0.0f;
+        createInfo.minLod = 0.0f;
+        createInfo.maxLod = 0.0f;
+
+        vk::Sampler sampler;
+        util::VK_ASSERT(brain.device.createSampler(&createInfo, nullptr, &sampler), "Failed creating sampler!");
+        return sampler;
+    }
+
     static void TransitionImageLayout(vk::CommandBuffer commandBuffer, vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t numLayers = 1)
     {
         vk::ImageMemoryBarrier barrier{};
@@ -264,6 +353,57 @@ namespace util
                                       0, nullptr,
                                       0, nullptr,
                                       1, &barrier);
+    }
+
+    static void CopyBufferToImage(const VulkanBrain& brain, vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height)
+    {
+        vk::BufferImageCopy region{};
+        region.bufferImageHeight = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = vk::Offset3D{ 0, 0, 0 };
+        region.imageExtent = vk::Extent3D{ width, height, 1 };
+
+        vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
+
+        commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, 1, &region);
+
+        util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
+    }
+
+    static void CreateTextureImage(const VulkanBrain& brain, const Texture& texture, TextureHandle& textureHandle, vk::Format format)
+    {
+        vk::DeviceSize imageSize = texture.width * texture.height * texture.numChannels;
+
+        vk::Buffer stagingBuffer;
+        VmaAllocation stagingBufferAllocation;
+
+        util::CreateBuffer(brain, imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Texture staging buffer");
+
+        vmaCopyMemoryToAllocation(brain.vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
+
+        util::CreateImage(brain.vmaAllocator, texture.width, texture.height, format,
+                          vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+                          textureHandle.image, textureHandle.imageAllocation, "Texture image");
+
+        vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
+        util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+        util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
+
+        CopyBufferToImage(brain, stagingBuffer, textureHandle.image, texture.width, texture.height);
+
+        commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
+        util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+        util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
+
+        brain.device.destroy(stagingBuffer, nullptr);
+        vmaFreeMemory(brain.vmaAllocator, stagingBufferAllocation);
+
+        textureHandle.imageView = util::CreateImageView(brain.device, textureHandle.image, texture.GetFormat(), vk::ImageAspectFlagBits::eColor);
     }
 
     static void BeginLabel(vk::Queue queue, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi)

@@ -32,7 +32,7 @@ struct MeshPrimitive
     vk::PrimitiveTopology topology;
 
     vk::IndexType indexType;
-    std::vector<std::byte> indices;
+    std::vector<std::byte> indicesBytes;
     std::vector<Vertex> vertices;
 
     std::optional<uint32_t> materialIndex;
@@ -76,13 +76,6 @@ struct Material
     std::optional<uint32_t> emissiveIndex;
     glm::vec3 emissiveFactor;
     uint32_t emissiveUVChannel;
-};
-
-struct Model
-{
-    std::vector<Mesh> meshes;
-    std::vector<Material> materials;
-    std::vector<Texture> textures;
 };
 
 struct TextureHandle
@@ -157,7 +150,7 @@ struct MeshPrimitiveHandle
 {
     vk::PrimitiveTopology topology;
     vk::IndexType indexType;
-    uint32_t triangleCount;
+    uint32_t indexCount;
 
     vk::Buffer vertexBuffer;
     vk::Buffer indexBuffer;
@@ -172,9 +165,22 @@ struct MeshHandle
     std::vector<MeshPrimitiveHandle> primitives;
 };
 
+struct Hierarchy
+{
+    struct Node
+    {
+        glm::mat4 transform;
+        std::shared_ptr<MeshHandle> mesh;
+    };
+
+    std::vector<Node> allNodes;
+};
+
 struct ModelHandle
 {
-    std::vector<MeshHandle> meshes;
+    std::vector<std::shared_ptr<MeshHandle>> meshes;
     std::vector<std::shared_ptr<MaterialHandle>> materials;
     std::vector<std::shared_ptr<TextureHandle>> textures;
+
+    Hierarchy hierarchy;
 };

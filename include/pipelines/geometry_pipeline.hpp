@@ -11,6 +11,8 @@ struct UBO
     alignas(16) glm::mat4 proj;
 };
 
+constexpr uint32_t MAX_MESHES = 128;
+
 class GeometryPipeline
 {
 public:
@@ -36,7 +38,7 @@ private:
     void CreateDescriptorSets();
     void CreateUniformBuffers();
     void UpdateGeometryDescriptorSet(uint32_t frameIndex);
-    void UpdateUniformData(uint32_t currentFrame);
+    void UpdateUniformData(uint32_t currentFrame, const std::vector<glm::mat4> transforms);
 
     const VulkanBrain& _brain;
     const GBuffers& _gBuffers;

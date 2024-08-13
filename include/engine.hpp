@@ -11,6 +11,7 @@
 #include "include.hpp"
 #include "pipelines/geometry_pipeline.hpp"
 #include "pipelines/lighting_pipeline.hpp"
+#include "model_loader.hpp"
 
 class Engine
 {
@@ -30,11 +31,10 @@ private:
 
     std::unique_ptr<GeometryPipeline> _geometryPipeline;
     std::unique_ptr<LightingPipeline> _lightingPipeline;
+    std::unique_ptr<ModelLoader> _modelLoader;
 
     ModelHandle _model;
-    MaterialHandle _defaultMaterial;
 
-    vk::Sampler _sampler;
 
     std::unique_ptr<SwapChain> _swapChain;
     std::unique_ptr<GBuffers> _gBuffers;
@@ -53,11 +53,4 @@ private:
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
     void CreateSyncObjects();
-    void CreateTextureImage(const Texture& texture, TextureHandle& textureHandle, vk::Format format);
-    void CopyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
-    void CreateTextureSampler();
-    ModelHandle LoadModel(const Model& model);
-
-    MaterialHandle CreateMaterial(const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info);
-    void CreateDefaultMaterial();
 };

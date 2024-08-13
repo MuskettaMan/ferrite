@@ -26,7 +26,6 @@ private:
     void CreatePipeline();
     void CreateDescriptorSetLayout();
     void CreateDescriptorSets();
-    void CreateSampler();
 
     const VulkanBrain& _brain;
     const GBuffers& _gBuffers;
