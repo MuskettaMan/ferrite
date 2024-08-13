@@ -12,6 +12,7 @@ public:
     ~LightingPipeline();
 
     void RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, uint32_t swapChainIndex);
+    void UpdateGBufferViews();
 
     NON_MOVABLE(LightingPipeline);
     NON_COPYABLE(LightingPipeline);

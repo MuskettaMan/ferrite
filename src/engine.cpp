@@ -98,6 +98,7 @@ void Engine::Run()
     {
         _swapChain->Resize(_application->DisplaySize());
         _gBuffers->Resize(_application->DisplaySize());
+        _lightingPipeline->UpdateGBufferViews();
 
         return;
     } else
@@ -149,6 +150,7 @@ void Engine::Run()
     {
         _swapChain->Resize(_application->DisplaySize());
         _gBuffers->Resize(_application->DisplaySize());
+        _lightingPipeline->UpdateGBufferViews();
     }
     else
     {
@@ -224,14 +226,14 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
 
     util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),
-                                vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
+                                _gBuffers->GBufferFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
     _geometryPipeline->RecordCommands(commandBuffer, _currentFrame, _model);
 
 
     util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),
-                                vk::Format::eR16G16B16A16Sfloat, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+                                _gBuffers->GBufferFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
     _lightingPipeline->RecordCommands(commandBuffer, _currentFrame, swapChainImageIndex);

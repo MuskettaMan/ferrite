@@ -214,6 +214,36 @@ void LightingPipeline::CreateDescriptorSets()
     for (size_t i = 0; i < descriptorSets.size(); ++i)
         _frameData[i].descriptorSet = descriptorSets[i];
 
+    UpdateGBufferViews();
+}
+
+void LightingPipeline::CreateSampler()
+{
+    vk::PhysicalDeviceProperties properties{};
+    _brain.physicalDevice.getProperties(&properties);
+
+    vk::SamplerCreateInfo createInfo{};
+    createInfo.magFilter = vk::Filter::eLinear;
+    createInfo.minFilter = vk::Filter::eLinear;
+    createInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+    createInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+    createInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+    createInfo.anisotropyEnable = vk::True;
+    createInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    createInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+    createInfo.unnormalizedCoordinates = vk::False;
+    createInfo.compareEnable = vk::False;
+    createInfo.compareOp = vk::CompareOp::eAlways;
+    createInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+    createInfo.mipLodBias = 0.0f;
+    createInfo.minLod = 0.0f;
+    createInfo.maxLod = 0.0f;
+
+    util::VK_ASSERT(_brain.device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
+}
+
+void LightingPipeline::UpdateGBufferViews()
+{
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
         vk::DescriptorImageInfo samplerInfo{};
@@ -246,29 +276,4 @@ void LightingPipeline::CreateDescriptorSets()
 
         _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
     }
-}
-
-void LightingPipeline::CreateSampler()
-{
-    vk::PhysicalDeviceProperties properties{};
-    _brain.physicalDevice.getProperties(&properties);
-
-    vk::SamplerCreateInfo createInfo{};
-    createInfo.magFilter = vk::Filter::eLinear;
-    createInfo.minFilter = vk::Filter::eLinear;
-    createInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
-    createInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
-    createInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
-    createInfo.anisotropyEnable = vk::True;
-    createInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-    createInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
-    createInfo.unnormalizedCoordinates = vk::False;
-    createInfo.compareEnable = vk::False;
-    createInfo.compareOp = vk::CompareOp::eAlways;
-    createInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
-    createInfo.mipLodBias = 0.0f;
-    createInfo.minLod = 0.0f;
-    createInfo.maxLod = 0.0f;
-
-    util::VK_ASSERT(_brain.device.createSampler(&createInfo, nullptr, &_sampler), "Failed creating sampler!");
 }
