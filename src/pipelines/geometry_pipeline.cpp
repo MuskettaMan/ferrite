@@ -29,7 +29,7 @@ GeometryPipeline::~GeometryPipeline()
     _brain.device.destroy(_descriptorSetLayout);
 }
 
-void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, const ModelHandle& model)
+void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, const SceneDescription& scene)
 {
     std::array<vk::RenderingAttachmentInfoKHR, DEFERRED_ATTACHMENT_COUNT> colorAttachmentInfos{};
     for(size_t i = 0; i < colorAttachmentInfos.size(); ++i)
@@ -74,16 +74,16 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
     commandBuffer.setScissor(0, 1, &_gBuffers.Scissor());
 
     std::vector<glm::mat4> transforms;
-    transforms.reserve(model.hierarchy.allNodes.size());
-    for(auto& node : model.hierarchy.allNodes)
+    transforms.reserve(scene.model.hierarchy.allNodes.size());
+    for(auto& node : scene.model.hierarchy.allNodes)
     {
         transforms.emplace_back(node.transform);
     }
-    UpdateUniformData(currentFrame, transforms);
+    UpdateUniformData(currentFrame, transforms, scene.camera);
 
-    for(size_t i = 0; i < model.hierarchy.allNodes.size(); ++i)
+    for(size_t i = 0; i < scene.model.hierarchy.allNodes.size(); ++i)
     {
-        const auto& node = model.hierarchy.allNodes[i];
+        const auto& node = scene.model.hierarchy.allNodes[i];
 
         for(const auto& primitive : node.mesh->primitives)
         {
@@ -320,15 +320,19 @@ void GeometryPipeline::CreateUniformBuffers()
     }
 }
 
-void GeometryPipeline::UpdateUniformData(uint32_t currentFrame, const std::vector<glm::mat4> transforms)
+void GeometryPipeline::UpdateUniformData(uint32_t currentFrame, const std::vector<glm::mat4> transforms, const Camera& camera)
 {
     static auto startTime = std::chrono::high_resolution_clock::now();
 
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-    glm::mat4 view = glm::lookAt(glm::vec3{sinf(time), 0.7f, cosf(time)}, glm::vec3{0.0f}, glm::vec3{0.0f, 1.0f, 0.0f});;
-    glm::mat4 proj = glm::perspective(glm::radians(45.0f), _gBuffers.Size().x / static_cast<float>(_gBuffers.Size().y), 0.01f, 100.0f);
+    glm::vec3 cameraDirection = glm::normalize(camera.position - camera.front);
+    glm::vec3 cameraRight = glm::normalize(glm::cross(camera.up, cameraDirection));
+    glm::vec3 cameraUp = glm::cross(cameraDirection, cameraRight);
+
+    glm::mat4 view = glm::lookAt(camera.position, camera.front, cameraUp);
+    glm::mat4 proj = glm::perspective(camera.fov, _gBuffers.Size().x / static_cast<float>(_gBuffers.Size().y), camera.nearPlane, camera.farPlane);
     proj[1][1] *= -1;
 
     std::array<UBO, MAX_MESHES> ubos;

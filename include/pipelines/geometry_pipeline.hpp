@@ -19,7 +19,7 @@ public:
     GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, vk::DescriptorSetLayout materialDescriptorSetLayout);
     ~GeometryPipeline();
 
-    void RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, const ModelHandle& model);
+    void RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, const SceneDescription& scene);
 
     NON_MOVABLE(GeometryPipeline);
     NON_COPYABLE(GeometryPipeline);
@@ -38,7 +38,7 @@ private:
     void CreateDescriptorSets();
     void CreateUniformBuffers();
     void UpdateGeometryDescriptorSet(uint32_t frameIndex);
-    void UpdateUniformData(uint32_t currentFrame, const std::vector<glm::mat4> transforms);
+    void UpdateUniformData(uint32_t currentFrame, const std::vector<glm::mat4> transforms, const Camera& camera);
 
     const VulkanBrain& _brain;
     const GBuffers& _gBuffers;

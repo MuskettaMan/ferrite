@@ -25,10 +25,16 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
 
     _window = glfwCreateWindow(mode->width, mode->height, _windowTitle.data(), nullptr, nullptr);
 
+
     int32_t width, height;
     glfwGetWindowSize(_window, &width, &height);
     _width = width;
     _height = height;
+
+    double xPos, yPos;
+    glfwGetCursorPos(_window, &xPos, &yPos);
+    _mousePos.x = xPos;
+    _mousePos.y = yPos;
 }
 
 void WinApp::Run(std::function<void()> updateLoop)
@@ -43,7 +49,31 @@ void WinApp::Run(std::function<void()> updateLoop)
         _width = width;
         _height = height;
 
+        double xPos, yPos;
+        glfwGetCursorPos(_window, &xPos, &yPos);
+        _mousePos.x = xPos;
+        _mousePos.y = yPos;
+
+        if(glfwGetKey(_window, GLFW_KEY_ESCAPE) && !_escapePressedPreviousFrame)
+        {
+            _escapePressedPreviousFrame = true;
+            _cursorDisabled = false;
+            glfwSetInputMode(_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        }
+        else
+            _escapePressedPreviousFrame = false;
+
+        if(glfwGetMouseButton(_window, 0))
+        {
+            _cursorDisabled = true;
+            _lastMousePos = _mousePos;
+            glfwSetInputMode(_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        }
+
         updateLoop();
+
+        if(_cursorDisabled)
+            _lastMousePos = _mousePos;
     }
 }
 
@@ -94,5 +124,18 @@ void WinApp::NewImGuiFrame()
 void WinApp::ShutdownImGui()
 {
     ImGui_ImplGlfw_Shutdown();
+}
+
+glm::vec2 WinApp::GetMousePosition()
+{
+    if(!_cursorDisabled)
+        return _lastMousePos;
+
+    return _mousePos;
+}
+
+bool WinApp::KeyPressed(uint32_t keyCode)
+{
+    return glfwGetKey(_window, keyCode);
 }
 

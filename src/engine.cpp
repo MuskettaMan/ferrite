@@ -42,7 +42,7 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     CreateCommandBuffers();
     CreateSyncObjects();
 
-    _model = _modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
+    _scene.model = _modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
     //_model = modelLoader.Load("assets/models/DamagedHelmet.glb");
 
     vk::Format format = _swapChain->GetFormat();
@@ -70,11 +70,26 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
     ImGui_ImplVulkan_CreateFontsTexture();
 
+    _scene.camera.position = glm::vec3{ 0.0f, 0.2f, 0.0f };
+    _scene.camera.up = glm::vec3{0.0f, 1.0f, 0.0f };
+    _scene.camera.front = glm::vec3{0.0f, 0.0f, 1.0f };
+    _scene.camera.fov = glm::radians(45.0f);
+    _scene.camera.nearPlane = 0.01f;
+    _scene.camera.farPlane = 100.0f;
+
+    _previousMousePos = _application->GetMousePosition();
+    _lastFrameTime = std::chrono::high_resolution_clock::now();
+
     spdlog::info("Successfully initialized engine!");
 }
 
 void Engine::Run()
 {
+    auto currentFrameTime = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float, std::milli> deltaTime = currentFrameTime - _lastFrameTime;
+    _lastFrameTime = currentFrameTime;
+    float deltaTimeMS = deltaTime.count();
+
     // Slow down application when minimized.
     if(_application->IsMinimized())
     {
@@ -82,6 +97,27 @@ void Engine::Run()
         std::this_thread::sleep_for(16ms);
         return;
     }
+
+    glm::vec2 mousePos = _application->GetMousePosition();
+    _scene.camera.yaw += (mousePos.x - _previousMousePos.x) * 0.1f;
+    _scene.camera.pitch += (_previousMousePos.y - mousePos.y) * 0.1f;
+    _scene.camera.pitch = std::clamp(_scene.camera.pitch, -89.0f, 89.0f);
+    _scene.camera.front = glm::normalize(glm::vec3{ cos(glm::radians(_scene.camera.yaw)) * cos(glm::radians(_scene.camera.pitch)),
+                                                    sin(glm::radians(_scene.camera.pitch)),
+                                                    sin(glm::radians(_scene.camera.yaw)) * cos(glm::radians(_scene.camera.pitch)) });
+
+    const float speed = 0.0005f * deltaTimeMS;
+    glm::vec3 movement{ 0.0f };
+    if(_application->KeyPressed('W'))
+        movement += _scene.camera.front * speed;
+    else if(_application->KeyPressed('S'))
+        movement += _scene.camera.front * -speed;
+    else if(_application->KeyPressed('A'))
+        movement += glm::cross(_scene.camera.front, _scene.camera.up) * -speed;
+    else if(_application->KeyPressed('D'))
+        movement += glm::cross(_scene.camera.front, _scene.camera.up) * speed;
+
+    _scene.camera.position += movement;
 
     util::VK_ASSERT(_brain.device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()),
                     "Failed waiting on in flight fence!");
@@ -156,6 +192,8 @@ void Engine::Run()
     _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 
     _performanceTracker.Update();
+
+    _previousMousePos = _application->GetMousePosition();
 }
 
 Engine::~Engine()
@@ -172,7 +210,7 @@ Engine::~Engine()
         _brain.device.destroy(_imageAvailableSemaphores[i]);
     }
 
-    for(auto& mesh : _model.meshes)
+    for(auto& mesh : _scene.model.meshes)
     {
         for(auto& primitive : mesh->primitives)
         {
@@ -180,12 +218,12 @@ Engine::~Engine()
             vmaDestroyBuffer(_brain.vmaAllocator, primitive.indexBuffer, primitive.indexBufferAllocation);
         }
     }
-    for(auto& texture : _model.textures)
+    for(auto& texture : _scene.model.textures)
     {
         _brain.device.destroy(texture->imageView);
         vmaDestroyImage(_brain.vmaAllocator, texture->image, texture->imageAllocation);
     }
-    for(auto& material : _model.materials)
+    for(auto& material : _scene.model.materials)
     {
         vmaDestroyBuffer(_brain.vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
     }
@@ -217,7 +255,7 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
                                 _gBuffers->GBufferFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
-    _geometryPipeline->RecordCommands(commandBuffer, _currentFrame, _model);
+    _geometryPipeline->RecordCommands(commandBuffer, _currentFrame, _scene);
 
 
     util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),

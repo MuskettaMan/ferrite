@@ -16,7 +16,6 @@
 class Engine
 {
 public:
-
     Engine(const InitInfo& initInfo, std::shared_ptr<Application> application);
     ~Engine();
     NON_COPYABLE(Engine);
@@ -33,8 +32,7 @@ private:
     std::unique_ptr<LightingPipeline> _lightingPipeline;
     std::unique_ptr<ModelLoader> _modelLoader;
 
-    ModelHandle _model;
-
+    SceneDescription _scene;
 
     std::unique_ptr<SwapChain> _swapChain;
     std::unique_ptr<GBuffers> _gBuffers;
@@ -46,8 +44,11 @@ private:
     std::shared_ptr<Application> _application;
 
     uint32_t _currentFrame{ 0 };
+    std::chrono::time_point<std::chrono::high_resolution_clock> _lastFrameTime;
 
     PerformanceTracker _performanceTracker;
+
+    glm::vec2 _previousMousePos;
 
     void CreateDescriptorSetLayout();
     void CreateCommandBuffers();

@@ -29,6 +29,8 @@ public:
     virtual void InitImGui() = 0;
     virtual void NewImGuiFrame() = 0;
     virtual void ShutdownImGui() = 0;
+    virtual glm::vec2 GetMousePosition() = 0;
+    virtual bool KeyPressed(uint32_t keyCode) = 0;
 
 protected:
     uint32_t _width, _height;

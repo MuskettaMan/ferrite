@@ -6,6 +6,7 @@
 #include "vk_mem_alloc.h"
 #include <memory>
 #include <optional>
+#include <glm/gtc/quaternion.hpp>
 
 struct Vertex
 {
@@ -183,4 +184,23 @@ struct ModelHandle
     std::vector<std::shared_ptr<TextureHandle>> textures;
 
     Hierarchy hierarchy;
+};
+
+struct Camera
+{
+    glm::vec3 position;
+    glm::vec3 up;
+    glm::vec3 front;
+    float fov;
+
+    float yaw, pitch;
+
+    float nearPlane;
+    float farPlane;
+};
+
+struct SceneDescription
+{
+    Camera camera;
+    ModelHandle model;
 };

@@ -2,6 +2,7 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
 
 class WinApp : public Application
 {
@@ -15,7 +16,14 @@ public:
     void InitImGui() override;
     void NewImGuiFrame() override;
     void ShutdownImGui() override;
+    glm::vec2 GetMousePosition() override;
+    bool KeyPressed(uint32_t keyCode) override;
 
 private:
     GLFWwindow* _window;
+
+    glm::vec2 _mousePos;
+    glm::vec2 _lastMousePos;
+    bool _cursorDisabled{ false };
+    bool _escapePressedPreviousFrame;
 };
