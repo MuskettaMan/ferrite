@@ -322,16 +322,10 @@ void GeometryPipeline::CreateUniformBuffers()
 
 void GeometryPipeline::UpdateUniformData(uint32_t currentFrame, const std::vector<glm::mat4> transforms, const Camera& camera)
 {
-    static auto startTime = std::chrono::high_resolution_clock::now();
+    glm::mat4 cameraRotation = glm::toMat4(camera.rotation);
+    glm::mat4 cameraTranslation = glm::translate(glm::mat4{1.0f}, camera.position);
 
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
-    glm::vec3 cameraDirection = glm::normalize(camera.position - camera.front);
-    glm::vec3 cameraRight = glm::normalize(glm::cross(camera.up, cameraDirection));
-    glm::vec3 cameraUp = glm::cross(cameraDirection, cameraRight);
-
-    glm::mat4 view = glm::lookAt(camera.position, camera.front, cameraUp);
+    glm::mat4 view = glm::inverse(cameraTranslation * cameraRotation);
     glm::mat4 proj = glm::perspective(camera.fov, _gBuffers.Size().x / static_cast<float>(_gBuffers.Size().y), camera.nearPlane, camera.farPlane);
     proj[1][1] *= -1;
 

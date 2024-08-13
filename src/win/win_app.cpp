@@ -35,6 +35,7 @@ WinApp::WinApp(const CreateParameters& parameters) : Application(parameters)
     glfwGetCursorPos(_window, &xPos, &yPos);
     _mousePos.x = xPos;
     _mousePos.y = yPos;
+    _lastMousePos = _mousePos;
 }
 
 void WinApp::Run(std::function<void()> updateLoop)
@@ -132,6 +133,11 @@ glm::vec2 WinApp::GetMousePosition()
         return _lastMousePos;
 
     return _mousePos;
+}
+
+glm::vec2 WinApp::GetLastMousePosition()
+{
+    return _lastMousePos;
 }
 
 bool WinApp::KeyPressed(uint32_t keyCode)

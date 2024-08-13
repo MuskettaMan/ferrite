@@ -48,8 +48,6 @@ private:
 
     PerformanceTracker _performanceTracker;
 
-    glm::vec2 _previousMousePos;
-
     void CreateDescriptorSetLayout();
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);

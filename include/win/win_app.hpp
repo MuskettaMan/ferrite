@@ -17,6 +17,7 @@ public:
     void NewImGuiFrame() override;
     void ShutdownImGui() override;
     glm::vec2 GetMousePosition() override;
+    glm::vec2 GetLastMousePosition() override;
     bool KeyPressed(uint32_t keyCode) override;
 
 private:

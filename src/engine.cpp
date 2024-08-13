@@ -71,13 +71,10 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     ImGui_ImplVulkan_CreateFontsTexture();
 
     _scene.camera.position = glm::vec3{ 0.0f, 0.2f, 0.0f };
-    _scene.camera.up = glm::vec3{0.0f, 1.0f, 0.0f };
-    _scene.camera.front = glm::vec3{0.0f, 0.0f, 1.0f };
     _scene.camera.fov = glm::radians(45.0f);
     _scene.camera.nearPlane = 0.01f;
     _scene.camera.farPlane = 100.0f;
 
-    _previousMousePos = _application->GetMousePosition();
     _lastFrameTime = std::chrono::high_resolution_clock::now();
 
     spdlog::info("Successfully initialized engine!");
@@ -99,25 +96,33 @@ void Engine::Run()
     }
 
     glm::vec2 mousePos = _application->GetMousePosition();
-    _scene.camera.yaw += (mousePos.x - _previousMousePos.x) * 0.1f;
-    _scene.camera.pitch += (_previousMousePos.y - mousePos.y) * 0.1f;
-    _scene.camera.pitch = std::clamp(_scene.camera.pitch, -89.0f, 89.0f);
-    _scene.camera.front = glm::normalize(glm::vec3{ cos(glm::radians(_scene.camera.yaw)) * cos(glm::radians(_scene.camera.pitch)),
-                                                    sin(glm::radians(_scene.camera.pitch)),
-                                                    sin(glm::radians(_scene.camera.yaw)) * cos(glm::radians(_scene.camera.pitch)) });
+    glm::vec2 lastMousePos = _application->GetLastMousePosition();
+    float yaw = (mousePos.x - lastMousePos.x) * -0.1f;
+    float pitch = (lastMousePos.y - mousePos.y) * 0.1f;
+    pitch = std::clamp(pitch, -89.0f, 89.0f);
+
+    glm::quat yawQuat = glm::angleAxis(glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::quat pitchQuat = glm::angleAxis(glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
+    glm::quat rollQuat = glm::angleAxis(glm::radians(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+    _scene.camera.rotation = yawQuat * _scene.camera.rotation;
+    _scene.camera.rotation = _scene.camera.rotation * pitchQuat;
+    _scene.camera.rotation = rollQuat * _scene.camera.rotation;
+
+    _scene.camera.rotation = glm::normalize(_scene.camera.rotation);
 
     const float speed = 0.0005f * deltaTimeMS;
     glm::vec3 movement{ 0.0f };
     if(_application->KeyPressed('W'))
-        movement += _scene.camera.front * speed;
+        movement += glm::vec3{0.0f, 0.0f, -1.0f};
     else if(_application->KeyPressed('S'))
-        movement += _scene.camera.front * -speed;
+        movement += glm::vec3{0.0f, 0.0f, 1.0f};
     else if(_application->KeyPressed('A'))
-        movement += glm::cross(_scene.camera.front, _scene.camera.up) * -speed;
+        movement += glm::vec3{-1.0f, 0.0f, 0.0f};
     else if(_application->KeyPressed('D'))
-        movement += glm::cross(_scene.camera.front, _scene.camera.up) * speed;
+        movement += glm::vec3{1.0f, 0.0f, 0.0f};
 
-    _scene.camera.position += movement;
+    _scene.camera.position += _scene.camera.rotation * movement * deltaTimeMS * speed;
 
     util::VK_ASSERT(_brain.device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()),
                     "Failed waiting on in flight fence!");
@@ -192,8 +197,6 @@ void Engine::Run()
     _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 
     _performanceTracker.Update();
-
-    _previousMousePos = _application->GetMousePosition();
 }
 
 Engine::~Engine()

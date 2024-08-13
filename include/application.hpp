@@ -30,6 +30,7 @@ public:
     virtual void NewImGuiFrame() = 0;
     virtual void ShutdownImGui() = 0;
     virtual glm::vec2 GetMousePosition() = 0;
+    virtual glm::vec2 GetLastMousePosition() = 0;
     virtual bool KeyPressed(uint32_t keyCode) = 0;
 
 protected:
