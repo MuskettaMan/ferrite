@@ -13,8 +13,6 @@ GeometryPipeline::GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBu
     CreateUniformBuffers();
     CreateDescriptorSets();
     CreatePipeline(materialDescriptorSetLayout);
-
-    spdlog::info("ubo size: {}, minUniformSize: {}, aligned size: {}", sizeof(UBO), _brain.minUniformBufferOffsetAlignment, align(sizeof(UBO), _brain.minUniformBufferOffsetAlignment));
 }
 
 GeometryPipeline::~GeometryPipeline()
@@ -80,6 +78,23 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
         transforms.emplace_back(node.transform);
     }
     UpdateUniformData(currentFrame, transforms, scene.camera);
+
+    for(const auto& primitive : scene.otherMeshes)
+    {
+        const MaterialHandle& material = *primitive.material;
+
+        uint32_t dynamicOffset = static_cast<uint32_t>(0 * sizeof(UBO));
+
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 1, &dynamicOffset);
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &material.descriptorSet, 0, nullptr);
+
+        vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
+        vk::DeviceSize offsets[] = { 0 };
+        commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+        commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
+
+        commandBuffer.drawIndexed(primitive.indexCount, 1, 0, 0, 0);
+    }
 
     for(size_t i = 0; i < scene.model.hierarchy.allNodes.size(); ++i)
     {

@@ -16,12 +16,13 @@ public:
     NON_MOVABLE(ModelLoader);
 
     ModelHandle Load(std::string_view path);
+    MeshPrimitiveHandle LoadPrimitive(const MeshPrimitive& primitive, std::shared_ptr<MaterialHandle> material = nullptr);
 
 private:
     const VulkanBrain& _brain;
     fastgltf::Parser _parser;
     vk::Sampler _sampler;
-    MaterialHandle _defaultMaterial;
+    std::shared_ptr<MaterialHandle> _defaultMaterial;
     vk::DescriptorSetLayout _materialDescriptorSetLayout;
 
     Mesh ProcessMesh(const fastgltf::Mesh& gltfMesh, const fastgltf::Asset& gltf);

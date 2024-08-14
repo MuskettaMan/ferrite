@@ -200,4 +200,5 @@ struct SceneDescription
 {
     Camera camera;
     ModelHandle model;
+    std::vector<MeshPrimitiveHandle> otherMeshes;
 };

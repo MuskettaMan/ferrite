@@ -23,13 +23,13 @@ ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout mater
     });
 
     MaterialHandle::MaterialInfo info;
-    _defaultMaterial = util::CreateMaterial(_brain, textures, info, _sampler, _materialDescriptorSetLayout);
+    _defaultMaterial = std::make_shared<MaterialHandle>(util::CreateMaterial(_brain, textures, info, _sampler, _materialDescriptorSetLayout));
 }
 
 ModelLoader::~ModelLoader()
 {
-    vmaDestroyBuffer(_brain.vmaAllocator, _defaultMaterial.materialUniformBuffer, _defaultMaterial.materialUniformAllocation);
-    for(auto& texture : _defaultMaterial.textures)
+    vmaDestroyBuffer(_brain.vmaAllocator, _defaultMaterial->materialUniformBuffer, _defaultMaterial->materialUniformAllocation);
+    for(auto& texture : _defaultMaterial->textures)
     {
         vmaDestroyImage(_brain.vmaAllocator, texture->image, texture->imageAllocation);
         _brain.device.destroy(texture->imageView);
@@ -398,7 +398,7 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         info.occlusionStrength = material.occlusionStrength;
         info.emissiveFactor = material.emissiveFactor;
 
-        modelHandle.materials.emplace_back(std::make_shared<MaterialHandle>(util::CreateMaterial(_brain, textures, info, _sampler, _materialDescriptorSetLayout, &_defaultMaterial)));
+        modelHandle.materials.emplace_back(std::make_shared<MaterialHandle>(util::CreateMaterial(_brain, textures, info, _sampler, _materialDescriptorSetLayout, _defaultMaterial)));
     }
 
     // Load meshes
@@ -407,18 +407,7 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         MeshHandle meshHandle{};
 
         for(const auto& primitive : mesh.primitives)
-        {
-            MeshPrimitiveHandle primitiveHandle{};
-            primitiveHandle.material = primitive.materialIndex.has_value() ? modelHandle.materials[primitive.materialIndex.value()] : nullptr;
-            primitiveHandle.topology = primitive.topology;
-            primitiveHandle.indexType = primitive.indexType;
-            primitiveHandle.indexCount = primitive.indicesBytes.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
-
-            util::CreateLocalBuffer(_brain, primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
-            util::CreateLocalBuffer(_brain, primitive.indicesBytes, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
-
-            meshHandle.primitives.emplace_back(primitiveHandle);
-        }
+            meshHandle.primitives.emplace_back(LoadPrimitive(primitive, primitive.materialIndex.has_value() ? modelHandle.materials[primitive.materialIndex.value()] : nullptr));
 
         modelHandle.meshes.emplace_back(std::make_shared<MeshHandle>(meshHandle));
     }
@@ -427,6 +416,20 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         RecurseHierarchy(gltf.nodes[gltf.scenes[0].nodeIndices[i]], modelHandle, gltf, glm::mat4{1.0f});
 
     return modelHandle;
+}
+
+MeshPrimitiveHandle ModelLoader::LoadPrimitive(const MeshPrimitive& primitive, std::shared_ptr<MaterialHandle> material)
+{
+    MeshPrimitiveHandle primitiveHandle{};
+    primitiveHandle.material = material == nullptr ? _defaultMaterial : material;
+    primitiveHandle.topology = primitive.topology;
+    primitiveHandle.indexType = primitive.indexType;
+    primitiveHandle.indexCount = primitive.indicesBytes.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
+
+    util::CreateLocalBuffer(_brain, primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
+    util::CreateLocalBuffer(_brain, primitive.indicesBytes, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
+
+    return primitiveHandle;
 }
 
 void ModelLoader::RecurseHierarchy(const fastgltf::Node& gltfNode, ModelHandle& modelHandle, const fastgltf::Asset& gltf, glm::mat4 matrix)

@@ -48,6 +48,8 @@ private:
 
     PerformanceTracker _performanceTracker;
 
+    MeshPrimitiveHandle _uvSphere;
+
     void CreateDescriptorSetLayout();
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);

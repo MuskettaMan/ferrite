@@ -193,7 +193,7 @@ namespace util
         vmaFreeMemory(brain.vmaAllocator, stagingBufferAllocation);
     }
 
-    static MaterialHandle CreateMaterial(const VulkanBrain& brain, const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info, vk::Sampler sampler, vk::DescriptorSetLayout materialLayout, MaterialHandle* defaultMaterial = nullptr)
+    static MaterialHandle CreateMaterial(const VulkanBrain& brain, const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info, vk::Sampler sampler, vk::DescriptorSetLayout materialLayout, std::shared_ptr<MaterialHandle> defaultMaterial = nullptr)
     {
         MaterialHandle materialHandle;
         materialHandle.textures = textures;

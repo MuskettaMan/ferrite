@@ -12,7 +12,6 @@
 
 
 #include "include.hpp"
-#include "imgui.h"
 #include "vulkan_validation.hpp"
 #include "vulkan_helper.hpp"
 #include "imgui_impl_vulkan.h"
@@ -20,7 +19,8 @@
 #include "model_loader.hpp"
 #include "util.hpp"
 #include "vulkan_brain.hpp"
-#include <implot.h>
+#include "mesh_primitives.hpp"
+#include "mesh_primitives.hpp"
 
 Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> application) :
     _brain(initInfo)
@@ -76,6 +76,10 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     _scene.camera.farPlane = 100.0f;
 
     _lastFrameTime = std::chrono::high_resolution_clock::now();
+
+    _uvSphere = _modelLoader->LoadPrimitive(GenerateUVSphere(16, 16));
+
+    _scene.otherMeshes.emplace_back(_uvSphere);
 
     spdlog::info("Successfully initialized engine!");
 }
