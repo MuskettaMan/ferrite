@@ -1,8 +1,9 @@
 #version 460
 
 layout(location = 0) in vec3 position;
-layout(location = 1) in vec3 normal;
+layout(location = 1) in vec3 normalIn;
 layout(location = 2) in vec2 texCoord;
+layout(location = 3) in mat3 TBN;
 
 layout(location = 0) out vec4 outAlbedoM;    // RGB: Albedo,   A: Metallic
 layout(location = 1) out vec4 outNormalR;    // RGB: Normal,   A: Roughness
@@ -39,6 +40,9 @@ void main()
     vec4 mrSample = vec4(0.0);
     vec4 occlusionSample = vec4(1.0);
     vec4 emissiveSample = vec4(0.0);
+
+    vec3 normal = normalIn;
+
     if(materialInfoUBO.useAlbedoMap)
     {
         albedoSample = pow(texture(sampler2D(albedoImage, imageSampler), texCoord), vec4(2.2));
@@ -49,7 +53,9 @@ void main()
     }
     if(materialInfoUBO.useNormalMap)
     {
-        // Can't sample normal map until we have TBN matrix.
+        vec4 normalSample = texture(sampler2D(normalImage, imageSampler), texCoord);
+        normal = normalSample.xyz * 2.0 - 1.0;
+        normal = normalize(TBN * normal);
     }
     if(materialInfoUBO.useOcclusionMap)
     {
