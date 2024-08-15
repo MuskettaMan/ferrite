@@ -23,7 +23,6 @@
 #include "vk_mem_alloc.h"
 
 #include "class_decorations.hpp"
-#include "vulkan_helper.hpp"
 #include "vulkan_brain.hpp"
 #include "imgui.h"
 #include <implot.h>

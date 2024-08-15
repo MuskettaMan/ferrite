@@ -20,7 +20,6 @@
 #include "util.hpp"
 #include "vulkan_brain.hpp"
 #include "mesh_primitives.hpp"
-#include "mesh_primitives.hpp"
 
 Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> application) :
     _brain(initInfo)
@@ -32,12 +31,15 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     _application = std::move(application);
 
     CreateDescriptorSetLayout();
+    InitializeCameraUBODescriptors();
+
+    _modelLoader = std::make_unique<ModelLoader>(_brain, _materialDescriptorSetLayout);
 
     _swapChain = std::make_unique<SwapChain>(_brain, glm::uvec2{ initInfo.width, initInfo.height });
     _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
-    _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout);
+    _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout, _cameraStructure);
+    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, *_swapChain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32)), _cameraStructure);
     _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, *_swapChain);
-    _modelLoader = std::make_unique<ModelLoader>(_brain, _materialDescriptorSetLayout);
 
     CreateCommandBuffers();
     CreateSyncObjects();
@@ -76,10 +78,6 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     _scene.camera.farPlane = 100.0f;
 
     _lastFrameTime = std::chrono::high_resolution_clock::now();
-
-    _uvSphere = _modelLoader->LoadPrimitive(GenerateUVSphere(16, 16));
-
-    _scene.otherMeshes.emplace_back(_uvSphere);
 
     spdlog::info("Successfully initialized engine!");
 }
@@ -127,6 +125,9 @@ void Engine::Run()
         movement += glm::vec3{1.0f, 0.0f, 0.0f};
 
     _scene.camera.position += _scene.camera.rotation * movement * deltaTimeMS * speed;
+
+    CameraUBO cameraUBO = CalculateCamera(_scene.camera);
+    std::memcpy(_cameraStructure.mappedPtrs[_currentFrame], &cameraUBO, sizeof(CameraUBO));
 
     util::VK_ASSERT(_brain.device.waitForFences(1, &_inFlightFences[_currentFrame], vk::True, std::numeric_limits<uint64_t>::max()),
                     "Failed waiting on in flight fence!");
@@ -235,6 +236,13 @@ Engine::~Engine()
         vmaDestroyBuffer(_brain.vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
     }
 
+    _brain.device.destroy(_cameraStructure.descriptorSetLayout);
+    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        vmaUnmapMemory(_brain.vmaAllocator, _cameraStructure.allocations[i]);
+        vmaDestroyBuffer(_brain.vmaAllocator, _cameraStructure.buffers[i], _cameraStructure.allocations[i]);
+    }
+
     _swapChain.reset();
 
     _brain.device.destroy(_materialDescriptorSetLayout);
@@ -269,6 +277,8 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
                                 _gBuffers->GBufferFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
+    _skydomePipeline->RecordCommands(commandBuffer, _currentFrame, swapChainImageIndex);
+
     _lightingPipeline->RecordCommands(commandBuffer, _currentFrame, swapChainImageIndex);
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
@@ -293,10 +303,92 @@ void Engine::CreateSyncObjects()
 
 void Engine::CreateDescriptorSetLayout()
 {
-    auto layoutBindings = MaterialHandle::GetLayoutBindings();
-    vk::DescriptorSetLayoutCreateInfo createInfo{};
-    createInfo.bindingCount = layoutBindings.size();
-    createInfo.pBindings = layoutBindings.data();
-    util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_materialDescriptorSetLayout),
+    auto materialLayoutBindings = MaterialHandle::GetLayoutBindings();
+    vk::DescriptorSetLayoutCreateInfo materialCreateInfo{};
+    materialCreateInfo.bindingCount = materialLayoutBindings.size();
+    materialCreateInfo.pBindings = materialLayoutBindings.data();
+    util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&materialCreateInfo, nullptr, &_materialDescriptorSetLayout),
                     "Failed creating material descriptor set layout!");
+
+
+    vk::DescriptorSetLayoutBinding cameraUBODescriptorSetBinding{};
+    cameraUBODescriptorSetBinding.binding = 0;
+    cameraUBODescriptorSetBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+    cameraUBODescriptorSetBinding.descriptorCount = 1;
+    cameraUBODescriptorSetBinding.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
+
+    vk::DescriptorSetLayoutCreateInfo cameraUBOCreateInfo{};
+    cameraUBOCreateInfo.bindingCount = 1;
+    cameraUBOCreateInfo.pBindings = &cameraUBODescriptorSetBinding;
+    util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&cameraUBOCreateInfo, nullptr, &_cameraStructure.descriptorSetLayout),
+                    "Failed creating camera UBO descriptor set layout!");
+}
+
+void Engine::InitializeCameraUBODescriptors()
+{
+    vk::DeviceSize bufferSize = sizeof(CameraUBO);
+
+    // Create buffers.
+    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        util::CreateBuffer(_brain, bufferSize,
+                           vk::BufferUsageFlagBits::eUniformBuffer,
+                           _cameraStructure.buffers[i], true, _cameraStructure.allocations[i],
+                           "Uniform buffer");
+
+        util::VK_ASSERT(vmaMapMemory(_brain.vmaAllocator, _cameraStructure.allocations[i], &_cameraStructure.mappedPtrs[i]), "Failed mapping memory for UBO!");
+    }
+
+    std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
+    std::for_each(layouts.begin(), layouts.end(), [this](auto& l)
+    { l = _cameraStructure.descriptorSetLayout; });
+    vk::DescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.descriptorPool = _brain.descriptorPool;
+    allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    allocateInfo.pSetLayouts = layouts.data();
+
+    util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, _cameraStructure.descriptorSets.data()),
+                    "Failed allocating descriptor sets!");
+
+    for (size_t i = 0; i < _cameraStructure.descriptorSets.size(); ++i)
+    {
+        UpdateCameraDescriptorSet(i);
+    }
+}
+
+void Engine::UpdateCameraDescriptorSet(uint32_t currentFrame)
+{
+    vk::DescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = _cameraStructure.buffers[currentFrame];
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(CameraUBO);
+
+    std::array<vk::WriteDescriptorSet, 1> descriptorWrites{};
+
+    vk::WriteDescriptorSet& bufferWrite{ descriptorWrites[0] };
+    bufferWrite.dstSet = _cameraStructure.descriptorSets[currentFrame];
+    bufferWrite.dstBinding = 0;
+    bufferWrite.dstArrayElement = 0;
+    bufferWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+    bufferWrite.descriptorCount = 1;
+    bufferWrite.pBufferInfo = &bufferInfo;
+
+    _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+}
+
+CameraUBO Engine::CalculateCamera(const Camera& camera)
+{
+    CameraUBO ubo{};
+
+    glm::mat4 cameraRotation = glm::toMat4(camera.rotation);
+    glm::mat4 cameraTranslation = glm::translate(glm::mat4{1.0f}, camera.position);
+
+    ubo.view = glm::inverse(cameraTranslation * cameraRotation);
+    ubo.proj = glm::perspective(camera.fov, _gBuffers->Size().x / static_cast<float>(_gBuffers->Size().y), camera.nearPlane, camera.farPlane);
+    ubo.proj[1][1] *= -1;
+
+    ubo.VP = ubo.proj * ubo.view;
+    ubo.cameraPosition = camera.position;
+
+    return ubo;
 }

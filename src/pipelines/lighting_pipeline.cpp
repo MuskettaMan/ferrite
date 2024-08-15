@@ -21,7 +21,7 @@ void LightingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
     finalColorAttachmentInfo.imageView = _swapChain.GetImageView(swapChainIndex);
     finalColorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
     finalColorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
-    finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
+    finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eLoad;
     finalColorAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
 
     vk::RenderingInfoKHR renderingInfo{};
@@ -56,7 +56,6 @@ LightingPipeline::~LightingPipeline()
     _brain.device.destroy(_pipelineLayout);
 
     _brain.device.destroy(_descriptorSetLayout);
-    _brain.device.destroy(_sampler);
 }
 
 void LightingPipeline::CreatePipeline()
@@ -142,31 +141,31 @@ void LightingPipeline::CreatePipeline()
     depthStencilStateCreateInfo.depthTestEnable = false;
     depthStencilStateCreateInfo.depthWriteEnable = false;
 
-    vk::GraphicsPipelineCreateInfo lightingPipelineCreateInfo{};
-    lightingPipelineCreateInfo.stageCount = 2;
-    lightingPipelineCreateInfo.pStages = shaderStages;
-    lightingPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
-    lightingPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
-    lightingPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
-    lightingPipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
-    lightingPipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
-    lightingPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
-    lightingPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
-    lightingPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
-    lightingPipelineCreateInfo.layout = _pipelineLayout;
-    lightingPipelineCreateInfo.subpass = 0;
-    lightingPipelineCreateInfo.basePipelineHandle = nullptr;
-    lightingPipelineCreateInfo.basePipelineIndex = -1;
+    vk::GraphicsPipelineCreateInfo pipelineCreateInfo{};
+    pipelineCreateInfo.stageCount = 2;
+    pipelineCreateInfo.pStages = shaderStages;
+    pipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+    pipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
+    pipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
+    pipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
+    pipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
+    pipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
+    pipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
+    pipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
+    pipelineCreateInfo.layout = _pipelineLayout;
+    pipelineCreateInfo.subpass = 0;
+    pipelineCreateInfo.basePipelineHandle = nullptr;
+    pipelineCreateInfo.basePipelineIndex = -1;
 
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
     vk::Format format = _swapChain.GetFormat();
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
 
-    lightingPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
-    lightingPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
+    pipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
+    pipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
 
-    auto result = _brain.device.createGraphicsPipeline(nullptr, lightingPipelineCreateInfo, nullptr);
+    auto result = _brain.device.createGraphicsPipeline(nullptr, pipelineCreateInfo, nullptr);
     util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
     _pipeline = result.value;
 
@@ -227,7 +226,7 @@ void LightingPipeline::UpdateGBufferViews()
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
         vk::DescriptorImageInfo samplerInfo{};
-        samplerInfo.sampler = _sampler;
+        samplerInfo.sampler = *_sampler;
 
         std::array<vk::DescriptorImageInfo, DEFERRED_ATTACHMENT_COUNT> imageInfo{};
         for(size_t j = 0; j < imageInfo.size(); ++j)

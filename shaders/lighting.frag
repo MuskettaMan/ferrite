@@ -24,6 +24,9 @@ void main()
     vec3 emissive = emissiveAO.rgb;
     float ao = emissiveAO.a;
 
+    if(normal == vec3(0.0, 0.0, 0.0))
+        discard;
+
     vec3 lightDir = normalize(vec3(0.5));
     float diff = max(dot(normal, lightDir), 0.0);
     vec3 diffuse = diff * albedo;

@@ -9,13 +9,13 @@ layout(location = 1) out vec4 outNormalR;    // RGB: Normal,   A: Roughness
 layout(location = 2) out vec4 outEmissiveAO; // RGB: Emissive, A: AO
 layout(location = 3) out vec4 outPosition;   // RGB: Position, A: Unused
 
-layout(set = 1, binding = 0) uniform sampler imageSampler;
-layout(set = 1, binding = 1) uniform texture2D albedoImage;
-layout(set = 1, binding = 2) uniform texture2D mrImage;
-layout(set = 1, binding = 3) uniform texture2D normalImage;
-layout(set = 1, binding = 4) uniform texture2D occlusionImage;
-layout(set = 1, binding = 5) uniform texture2D emissiveImage;
-layout(set = 1, binding = 6) uniform MaterialInfoUBO
+layout(set = 2, binding = 0) uniform sampler imageSampler;
+layout(set = 2, binding = 1) uniform texture2D albedoImage;
+layout(set = 2, binding = 2) uniform texture2D mrImage;
+layout(set = 2, binding = 3) uniform texture2D normalImage;
+layout(set = 2, binding = 4) uniform texture2D occlusionImage;
+layout(set = 2, binding = 5) uniform texture2D emissiveImage;
+layout(set = 2, binding = 6) uniform MaterialInfoUBO
 {
     vec4 albedoFactor;
 

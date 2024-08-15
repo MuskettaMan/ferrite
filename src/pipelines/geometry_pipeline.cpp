@@ -5,9 +5,10 @@ VkDeviceSize align(VkDeviceSize value, VkDeviceSize alignment) {
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
-GeometryPipeline::GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, vk::DescriptorSetLayout materialDescriptorSetLayout) :
+GeometryPipeline::GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, vk::DescriptorSetLayout materialDescriptorSetLayout, const CameraStructure& camera) :
     _brain(brain),
-    _gBuffers(gBuffers)
+    _gBuffers(gBuffers),
+    _camera(camera)
 {
     CreateDescriptorSetLayout();
     CreateUniformBuffers();
@@ -86,7 +87,8 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
         uint32_t dynamicOffset = static_cast<uint32_t>(0 * sizeof(UBO));
 
         commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 1, &dynamicOffset);
-        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &material.descriptorSet, 0, nullptr);
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &_camera.descriptorSets[currentFrame], 0, nullptr);
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 2, 1, &material.descriptorSet, 0, nullptr);
 
         vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
         vk::DeviceSize offsets[] = { 0 };
@@ -111,7 +113,8 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
             uint32_t dynamicOffset = static_cast<uint32_t>(i * sizeof(UBO));
 
             commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 1, &dynamicOffset);
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &material.descriptorSet, 0, nullptr);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &_camera.descriptorSets[currentFrame], 0, nullptr);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 2, 1, &material.descriptorSet, 0, nullptr);
 
             vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
             vk::DeviceSize offsets[] = { 0 };
@@ -130,7 +133,7 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
 void GeometryPipeline::CreatePipeline(vk::DescriptorSetLayout materialDescriptorSetLayout)
 {
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    std::array<vk::DescriptorSetLayout, 2> layouts = { _descriptorSetLayout, materialDescriptorSetLayout };
+    std::array<vk::DescriptorSetLayout, 3> layouts = {_descriptorSetLayout, _camera.descriptorSetLayout, materialDescriptorSetLayout };
     pipelineLayoutCreateInfo.setLayoutCount = layouts.size();
     pipelineLayoutCreateInfo.pSetLayouts = layouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
@@ -226,21 +229,21 @@ void GeometryPipeline::CreatePipeline(vk::DescriptorSetLayout materialDescriptor
     depthStencilStateCreateInfo.maxDepthBounds = 1.0f;
     depthStencilStateCreateInfo.stencilTestEnable = false;
 
-    vk::GraphicsPipelineCreateInfo geometryPipelineCreateInfo{};
-    geometryPipelineCreateInfo.stageCount = 2;
-    geometryPipelineCreateInfo.pStages = shaderStages;
-    geometryPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
-    geometryPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
-    geometryPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
-    geometryPipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
-    geometryPipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
-    geometryPipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
-    geometryPipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
-    geometryPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
-    geometryPipelineCreateInfo.layout = _pipelineLayout;
-    geometryPipelineCreateInfo.subpass = 0;
-    geometryPipelineCreateInfo.basePipelineHandle = nullptr;
-    geometryPipelineCreateInfo.basePipelineIndex = -1;
+    vk::GraphicsPipelineCreateInfo pipelineCreateInfo{};
+    pipelineCreateInfo.stageCount = 2;
+    pipelineCreateInfo.pStages = shaderStages;
+    pipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+    pipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
+    pipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
+    pipelineCreateInfo.pRasterizationState = &rasterizationStateCreateInfo;
+    pipelineCreateInfo.pMultisampleState = &multisampleStateCreateInfo;
+    pipelineCreateInfo.pDepthStencilState = &depthStencilStateCreateInfo;
+    pipelineCreateInfo.pColorBlendState = &colorBlendStateCreateInfo;
+    pipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
+    pipelineCreateInfo.layout = _pipelineLayout;
+    pipelineCreateInfo.subpass = 0;
+    pipelineCreateInfo.basePipelineHandle = nullptr;
+    pipelineCreateInfo.basePipelineIndex = -1;
 
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
     std::array<vk::Format, DEFERRED_ATTACHMENT_COUNT> formats{};
@@ -249,10 +252,10 @@ void GeometryPipeline::CreatePipeline(vk::DescriptorSetLayout materialDescriptor
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = formats.data();
     pipelineRenderingCreateInfoKhr.depthAttachmentFormat = _gBuffers.DepthFormat();
 
-    geometryPipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
-    geometryPipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
+    pipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
+    pipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
 
-    auto result = _brain.device.createGraphicsPipeline(nullptr, geometryPipelineCreateInfo, nullptr);
+    auto result = _brain.device.createGraphicsPipeline(nullptr, pipelineCreateInfo, nullptr);
     util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
     _pipeline = result.value;
 
@@ -337,19 +340,10 @@ void GeometryPipeline::CreateUniformBuffers()
 
 void GeometryPipeline::UpdateUniformData(uint32_t currentFrame, const std::vector<glm::mat4> transforms, const Camera& camera)
 {
-    glm::mat4 cameraRotation = glm::toMat4(camera.rotation);
-    glm::mat4 cameraTranslation = glm::translate(glm::mat4{1.0f}, camera.position);
-
-    glm::mat4 view = glm::inverse(cameraTranslation * cameraRotation);
-    glm::mat4 proj = glm::perspective(camera.fov, _gBuffers.Size().x / static_cast<float>(_gBuffers.Size().y), camera.nearPlane, camera.farPlane);
-    proj[1][1] *= -1;
-
     std::array<UBO, MAX_MESHES> ubos;
     for(size_t i = 0; i < std::min(transforms.size(), ubos.size()); ++i)
     {
         ubos[i].model = transforms[i];
-        ubos[i].view = view;
-        ubos[i].proj = proj;
     }
 
     memcpy(_frameData[currentFrame].uniformBufferMapped, ubos.data(), ubos.size() * sizeof(UBO));

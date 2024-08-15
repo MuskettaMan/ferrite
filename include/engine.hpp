@@ -11,7 +11,9 @@
 #include "include.hpp"
 #include "pipelines/geometry_pipeline.hpp"
 #include "pipelines/lighting_pipeline.hpp"
+#include "pipelines/skydome_pipeline.hpp"
 #include "model_loader.hpp"
+#include "camera.hpp"
 
 class Engine
 {
@@ -30,6 +32,7 @@ private:
 
     std::unique_ptr<GeometryPipeline> _geometryPipeline;
     std::unique_ptr<LightingPipeline> _lightingPipeline;
+    std::unique_ptr<SkydomePipeline> _skydomePipeline;
     std::unique_ptr<ModelLoader> _modelLoader;
 
     SceneDescription _scene;
@@ -41,6 +44,8 @@ private:
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _renderFinishedSemaphores;
     std::array<vk::Fence, MAX_FRAMES_IN_FLIGHT> _inFlightFences;
 
+    CameraStructure _cameraStructure;
+
     std::shared_ptr<Application> _application;
 
     uint32_t _currentFrame{ 0 };
@@ -48,10 +53,11 @@ private:
 
     PerformanceTracker _performanceTracker;
 
-    MeshPrimitiveHandle _uvSphere;
-
     void CreateDescriptorSetLayout();
     void CreateCommandBuffers();
     void RecordCommandBuffer(const vk::CommandBuffer& commandBuffer, uint32_t swapChainImageIndex);
     void CreateSyncObjects();
+    void InitializeCameraUBODescriptors();
+    void UpdateCameraDescriptorSet(uint32_t currentFrame);
+    CameraUBO CalculateCamera(const Camera& camera);
 };

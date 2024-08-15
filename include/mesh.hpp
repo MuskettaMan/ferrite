@@ -4,6 +4,7 @@
 #include <vulkan/vulkan.hpp>
 #include <glm/glm.hpp>
 #include "vk_mem_alloc.h"
+#include "camera.hpp"
 #include <memory>
 #include <optional>
 #include <glm/gtc/quaternion.hpp>
@@ -48,10 +49,25 @@ struct Texture
 {
     uint32_t width, height, numChannels;
     std::vector<std::byte> data;
+    bool isHDR = false;
 
     vk::Format GetFormat() const
     {
+        if(isHDR)
+            return vk::Format::eR32G32B32A32Sfloat;
+
         return vk::Format::eR8G8B8A8Srgb;
+    }
+};
+
+struct HDR
+{
+    uint32_t width, height, numChannels;
+    std::vector<float> data;
+
+    vk::Format GetFormat() const
+    {
+        return vk::Format::eR32G32B32A32Sfloat;
     }
 };
 
@@ -85,7 +101,7 @@ struct TextureHandle
     vk::Image image;
     VmaAllocation imageAllocation;
     vk::ImageView imageView;
-    uint32_t width, height, numChannels;
+    uint32_t width, height;
     vk::Format format;
 };
 
@@ -184,16 +200,6 @@ struct ModelHandle
     std::vector<std::shared_ptr<TextureHandle>> textures;
 
     Hierarchy hierarchy;
-};
-
-struct Camera
-{
-    glm::vec3 position;
-    glm::quat rotation;
-    float fov;
-
-    float nearPlane;
-    float farPlane;
 };
 
 struct SceneDescription

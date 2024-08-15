@@ -3,9 +3,16 @@
 layout(set = 0, binding = 0) uniform UBO
 {
     mat4 model;
+} ubo;
+
+layout(set = 1, binding = 0) uniform CameraUBO
+{
+    mat4 VP;
     mat4 view;
     mat4 proj;
-} ubo;
+
+    vec3 cameraPosition;
+} cameraUbo;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -23,5 +30,5 @@ void main()
     normal = (ubo.model * vec4(inNormal, 0.0)).xyz;
     texCoord = inTexCoord;
 
-    gl_Position = (ubo.proj * ubo.view) * vec4(position, 1.0);
+    gl_Position = (cameraUbo.VP) * vec4(position, 1.0);
 }

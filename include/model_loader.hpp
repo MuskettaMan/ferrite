@@ -21,7 +21,7 @@ public:
 private:
     const VulkanBrain& _brain;
     fastgltf::Parser _parser;
-    vk::Sampler _sampler;
+    vk::UniqueSampler _sampler;
     std::shared_ptr<MaterialHandle> _defaultMaterial;
     vk::DescriptorSetLayout _materialDescriptorSetLayout;
 

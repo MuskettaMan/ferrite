@@ -35,7 +35,7 @@ private:
     vk::PipelineLayout _pipelineLayout;
     vk::Pipeline _pipeline;
 
-    vk::Sampler _sampler;
+    vk::UniqueSampler _sampler;
 
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> _frameData;
 };

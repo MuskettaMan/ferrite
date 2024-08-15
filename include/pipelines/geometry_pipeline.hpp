@@ -7,8 +7,6 @@
 struct UBO
 {
     alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
 };
 
 constexpr uint32_t MAX_MESHES = 128;
@@ -16,7 +14,7 @@ constexpr uint32_t MAX_MESHES = 128;
 class GeometryPipeline
 {
 public:
-    GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, vk::DescriptorSetLayout materialDescriptorSetLayout);
+    GeometryPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, vk::DescriptorSetLayout materialDescriptorSetLayout, const CameraStructure& camera);
     ~GeometryPipeline();
 
     void RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, const SceneDescription& scene);
@@ -42,6 +40,7 @@ private:
 
     const VulkanBrain& _brain;
     const GBuffers& _gBuffers;
+    const CameraStructure& _camera;
 
     vk::DescriptorSetLayout _descriptorSetLayout;
     vk::PipelineLayout _pipelineLayout;

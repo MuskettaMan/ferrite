@@ -3,6 +3,7 @@
 #include <fastgltf/tools.hpp>
 #include <fastgltf/glm_element_traits.hpp>
 #include "stb_image.h"
+#include "vulkan_helper.hpp"
 
 ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout materialDescriptorSetLayout) :
     _brain(brain),
@@ -19,11 +20,11 @@ ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout mater
     std::array<std::shared_ptr<TextureHandle>, 5> textures;
     std::for_each(textures.begin(), textures.end(), [&texture, this](auto& ptr){
         ptr = std::make_shared<TextureHandle>();
-        util::CreateTextureImage(_brain, texture, *ptr, vk::Format::eR8G8B8A8Srgb);
+        util::CreateTextureImage(_brain, texture, *ptr);
     });
 
     MaterialHandle::MaterialInfo info;
-    _defaultMaterial = std::make_shared<MaterialHandle>(util::CreateMaterial(_brain, textures, info, _sampler, _materialDescriptorSetLayout));
+    _defaultMaterial = std::make_shared<MaterialHandle>(util::CreateMaterial(_brain, textures, info, *_sampler, _materialDescriptorSetLayout));
 }
 
 ModelLoader::~ModelLoader()
@@ -34,7 +35,6 @@ ModelLoader::~ModelLoader()
         vmaDestroyImage(_brain.vmaAllocator, texture->image, texture->imageAllocation);
         _brain.device.destroy(texture->imageView);
     }
-    _brain.device.destroy(_sampler);
 }
 
 ModelHandle ModelLoader::Load(std::string_view path)
@@ -367,9 +367,8 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         textureHandle.format = texture.GetFormat();
         textureHandle.width = texture.width;
         textureHandle.height = texture.height;
-        textureHandle.numChannels = texture.numChannels;
 
-        util::CreateTextureImage(_brain, texture, textureHandle, textureHandle.format);
+        util::CreateTextureImage(_brain, texture, textureHandle);
 
         modelHandle.textures.emplace_back(std::make_shared<TextureHandle>(textureHandle));
     }
@@ -398,7 +397,7 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         info.occlusionStrength = material.occlusionStrength;
         info.emissiveFactor = material.emissiveFactor;
 
-        modelHandle.materials.emplace_back(std::make_shared<MaterialHandle>(util::CreateMaterial(_brain, textures, info, _sampler, _materialDescriptorSetLayout, _defaultMaterial)));
+        modelHandle.materials.emplace_back(std::make_shared<MaterialHandle>(util::CreateMaterial(_brain, textures, info, *_sampler, _materialDescriptorSetLayout, _defaultMaterial)));
     }
 
     // Load meshes

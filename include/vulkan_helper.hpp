@@ -252,7 +252,7 @@ namespace util
         return materialHandle;
     }
 
-    static vk::Sampler CreateSampler(const VulkanBrain& brain, vk::Filter min, vk::Filter mag, vk::SamplerAddressMode addressingMode, vk::SamplerMipmapMode mipmapMode)
+    static vk::UniqueSampler CreateSampler(const VulkanBrain& brain, vk::Filter min, vk::Filter mag, vk::SamplerAddressMode addressingMode, vk::SamplerMipmapMode mipmapMode)
     {
         vk::PhysicalDeviceProperties properties{};
         brain.physicalDevice.getProperties(&properties);
@@ -274,9 +274,7 @@ namespace util
         createInfo.minLod = 0.0f;
         createInfo.maxLod = 0.0f;
 
-        vk::Sampler sampler;
-        util::VK_ASSERT(brain.device.createSampler(&createInfo, nullptr, &sampler), "Failed creating sampler!");
-        return sampler;
+        return brain.device.createSamplerUnique(createInfo);
     }
 
     static void TransitionImageLayout(vk::CommandBuffer commandBuffer, vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t numLayers = 1)
@@ -375,7 +373,7 @@ namespace util
         util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
     }
 
-    static void CreateTextureImage(const VulkanBrain& brain, const Texture& texture, TextureHandle& textureHandle, vk::Format format)
+    static void CreateTextureImage(const VulkanBrain& brain, const Texture& texture, TextureHandle& textureHandle)
     {
         vk::DeviceSize imageSize = texture.width * texture.height * texture.numChannels;
 
@@ -386,18 +384,18 @@ namespace util
 
         vmaCopyMemoryToAllocation(brain.vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
 
-        util::CreateImage(brain.vmaAllocator, texture.width, texture.height, format,
+        util::CreateImage(brain.vmaAllocator, texture.width, texture.height, texture.GetFormat(),
                           vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
                           textureHandle.image, textureHandle.imageAllocation, "Texture image");
 
         vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
-        util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+        util::TransitionImageLayout(commandBuffer, textureHandle.image, texture.GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
         util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 
         CopyBufferToImage(brain, stagingBuffer, textureHandle.image, texture.width, texture.height);
 
         commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
-        util::TransitionImageLayout(commandBuffer, textureHandle.image, format, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+        util::TransitionImageLayout(commandBuffer, textureHandle.image, texture.GetFormat(), vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
         util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 
         brain.device.destroy(stagingBuffer, nullptr);
