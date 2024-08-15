@@ -4,13 +4,15 @@
 #include "swap_chain.hpp"
 #include "vulkan_helper.hpp"
 
+struct HDRTarget;
+
 class SkydomePipeline
 {
 public:
-    SkydomePipeline(const VulkanBrain& brain, const SwapChain& swapChain, MeshPrimitiveHandle&& sphere, const CameraStructure& camera);
+    SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&& sphere, const CameraStructure& camera, const HDRTarget& hdrTarget);
     ~SkydomePipeline();
 
-    void RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, uint32_t swapChainIndex);
+    void RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame);
 
     NON_COPYABLE(SkydomePipeline);
     NON_MOVABLE(SkydomePipeline);
@@ -18,8 +20,8 @@ public:
 
 private:
     const VulkanBrain& _brain;
-    const SwapChain& _swapChain;
     const CameraStructure& _camera;
+    const HDRTarget& _hdrTarget;
 
     MeshPrimitiveHandle _sphere;
     TextureHandle _hdri;

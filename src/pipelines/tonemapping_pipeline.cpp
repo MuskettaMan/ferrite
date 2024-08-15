@@ -1,60 +1,40 @@
-#include "pipelines/skydome_pipeline.hpp"
+#include "pipelines/tonemapping_pipeline.hpp"
+#include "vulkan_helper.hpp"
 #include "shaders/shader_loader.hpp"
-#include "hdr_target.hpp"
+#include "imgui_impl_vulkan.h"
 
-SkydomePipeline::SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&& sphere, const CameraStructure& camera, const HDRTarget& hdrTarget) :
+
+TonemappingPipeline::TonemappingPipeline(const VulkanBrain& brain, const HDRTarget& hdrTarget, const SwapChain& _swapChain) :
     _brain(brain),
-    _sphere(sphere),
-    _camera(camera),
-    _hdrTarget(hdrTarget)
+    _hdrTarget(hdrTarget),
+    _swapChain(_swapChain)
 {
-    int32_t width, height, numChannels;
-    float* data = stbi_loadf("assets/hdri/industrial_sunset_02_puresky_4k.hdr", &width, &height, &numChannels, 4);
-
-    Texture texture{};
-    texture.width = width;
-    texture.height = height;
-    texture.numChannels = 4;
-    texture.isHDR = true;
-    texture.data.resize(width * height * texture.numChannels * sizeof(float));
-    std::memcpy(texture.data.data(), data, texture.data.size());
-
-    stbi_image_free(data);
-
-    util::CreateTextureImage(_brain, texture, _hdri);
-    util::NameObject(_hdri.image, "Skydome HDRI", _brain.device, _brain.dldi);
-
     _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear);
-
     CreateDescriptorSetLayout();
-    CreateDescriptorSet();
+    CreateDescriptorSets();
     CreatePipeline();
 }
 
-SkydomePipeline::~SkydomePipeline()
+TonemappingPipeline::~TonemappingPipeline()
 {
-    vmaDestroyBuffer(_brain.vmaAllocator, _sphere.vertexBuffer, _sphere.vertexBufferAllocation);
-    vmaDestroyBuffer(_brain.vmaAllocator, _sphere.indexBuffer, _sphere.indexBufferAllocation);
-
-    _brain.device.destroy(_hdri.imageView);
-    vmaDestroyImage(_brain.vmaAllocator, _hdri.image, _hdri.imageAllocation);
+    _brain.device.destroy(_pipeline);
+    _brain.device.destroy(_pipelineLayout);
 
     _brain.device.destroy(_descriptorSetLayout);
-    _brain.device.destroy(_pipelineLayout);
-    _brain.device.destroy(_pipeline);
 }
 
-void SkydomePipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame)
+
+void TonemappingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, uint32_t swapChainIndex)
 {
     vk::RenderingAttachmentInfoKHR finalColorAttachmentInfo{};
-    finalColorAttachmentInfo.imageView = _hdrTarget.imageViews[currentFrame];
+    finalColorAttachmentInfo.imageView = _swapChain.GetImageView(swapChainIndex);
     finalColorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
     finalColorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
     finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
     finalColorAttachmentInfo.clearValue.color = vk::ClearColorValue{ 0.0f, 0.0f, 0.0f, 0.0f };
 
     vk::RenderingInfoKHR renderingInfo{};
-    renderingInfo.renderArea.extent = vk::Extent2D{ _hdrTarget.size.x, _hdrTarget.size.y };
+    renderingInfo.renderArea.extent = vk::Extent2D{ _swapChain.GetImageSize().x, _swapChain.GetImageSize().y };
     renderingInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachments = &finalColorAttachmentInfo;
@@ -62,39 +42,36 @@ void SkydomePipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t c
     renderingInfo.pDepthAttachment = nullptr;
     renderingInfo.pStencilAttachment = nullptr;
 
-    util::BeginLabel(commandBuffer, "Skydome pass", glm::vec3{ 17.0f, 138.0f, 178.0f } / 255.0f, _brain.dldi);
+    util::BeginLabel(commandBuffer, "Tonemapping pass", glm::vec3{ 239.0f, 71.0f, 111.0f } / 255.0f, _brain.dldi);
     commandBuffer.beginRenderingKHR(&renderingInfo, _brain.dldi);
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pipeline);
 
-    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_descriptorSet, 0, nullptr);
-    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &_camera.descriptorSets[currentFrame], 0, nullptr);
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_descriptorSets[currentFrame], 0, nullptr);
 
-    vk::DeviceSize offsets[] = { 0 };
-    commandBuffer.bindVertexBuffers(0, 1, &_sphere.vertexBuffer, offsets);
-    commandBuffer.bindIndexBuffer(_sphere.indexBuffer, 0, _sphere.indexType);
+    // Fullscreen triangle.
+    commandBuffer.draw(3, 1, 0, 0);
 
-    commandBuffer.drawIndexed(_sphere.indexCount, 1, 0, 0, 0);
+    // TODO: Place more accordingly later.
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
     commandBuffer.endRenderingKHR(_brain.dldi);
     util::EndLabel(commandBuffer, _brain.dldi);
 }
 
-void SkydomePipeline::CreatePipeline()
+void TonemappingPipeline::CreatePipeline()
 {
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-
-    std::array<vk::DescriptorSetLayout, 2> descriptorSets = { _descriptorSetLayout, _camera.descriptorSetLayout };
-    pipelineLayoutCreateInfo.setLayoutCount = descriptorSets.size();
-    pipelineLayoutCreateInfo.pSetLayouts = descriptorSets.data();
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts = &_descriptorSetLayout;
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
     pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
     util::VK_ASSERT(_brain.device.createPipelineLayout(&pipelineLayoutCreateInfo, nullptr, &_pipelineLayout),
                     "Failed creating geometry pipeline layout!");
 
-    auto vertByteCode = shader::ReadFile("shaders/skydome-v.spv");
-    auto fragByteCode = shader::ReadFile("shaders/skydome-f.spv");
+    auto vertByteCode = shader::ReadFile("shaders/tonemapping-v.spv");
+    auto fragByteCode = shader::ReadFile("shaders/tonemapping-f.spv");
 
     vk::ShaderModule vertModule = shader::CreateShaderModule(vertByteCode, _brain.device);
     vk::ShaderModule fragModule = shader::CreateShaderModule(fragByteCode, _brain.device);
@@ -109,17 +86,9 @@ void SkydomePipeline::CreatePipeline()
     fragShaderStageCreateInfo.module = fragModule;
     fragShaderStageCreateInfo.pName = "main";
 
-    // TODO: This shader stuff can be moved into a util function for brevity.
     vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageCreateInfo, fragShaderStageCreateInfo };
 
-    auto bindingDesc = Vertex::GetBindingDescription();
-    auto attributes = Vertex::GetAttributeDescriptions();
-
     vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo{};
-    vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
-    vertexInputStateCreateInfo.pVertexBindingDescriptions = &bindingDesc;
-    vertexInputStateCreateInfo.vertexAttributeDescriptionCount = attributes.size();
-    vertexInputStateCreateInfo.pVertexAttributeDescriptions = attributes.data();
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo{};
     inputAssemblyStateCreateInfo.topology = vk::PrimitiveTopology::eTriangleList;
@@ -144,7 +113,7 @@ void SkydomePipeline::CreatePipeline()
     rasterizationStateCreateInfo.polygonMode = vk::PolygonMode::eFill;
     rasterizationStateCreateInfo.lineWidth = 1.0f;
     rasterizationStateCreateInfo.cullMode = vk::CullModeFlagBits::eBack;
-    rasterizationStateCreateInfo.frontFace = vk::FrontFace::eCounterClockwise;
+    rasterizationStateCreateInfo.frontFace = vk::FrontFace::eClockwise;
     rasterizationStateCreateInfo.depthBiasEnable = vk::False;
     rasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
     rasterizationStateCreateInfo.depthBiasClamp = 0.0f;
@@ -191,21 +160,21 @@ void SkydomePipeline::CreatePipeline()
 
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
-    vk::Format format = _hdrTarget.format;
+    vk::Format format = _swapChain.GetFormat();
     pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
 
     pipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
     pipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.
 
     auto result = _brain.device.createGraphicsPipeline(nullptr, pipelineCreateInfo, nullptr);
-    util::VK_ASSERT(result.result, "Failed creating the skydome pipeline layout!");
+    util::VK_ASSERT(result.result, "Failed creating the geometry pipeline layout!");
     _pipeline = result.value;
 
     _brain.device.destroy(vertModule);
     _brain.device.destroy(fragModule);
 }
 
-void SkydomePipeline::CreateDescriptorSetLayout()
+void TonemappingPipeline::CreateDescriptorSetLayout()
 {
     std::array<vk::DescriptorSetLayoutBinding, 1> bindings{};
 
@@ -221,31 +190,36 @@ void SkydomePipeline::CreateDescriptorSetLayout()
     createInfo.pBindings = bindings.data();
 
     util::VK_ASSERT(_brain.device.createDescriptorSetLayout(&createInfo, nullptr, &_descriptorSetLayout),
-                    "Failed creating skydome descriptor set layout!");
+                    "Failed creating tonemapping descriptor set layout!");
 }
 
-void SkydomePipeline::CreateDescriptorSet()
+void TonemappingPipeline::CreateDescriptorSets()
 {
+    std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
+    std::for_each(layouts.begin(), layouts.end(), [this](auto& l) { l = _descriptorSetLayout; });
     vk::DescriptorSetAllocateInfo allocateInfo{};
     allocateInfo.descriptorPool = _brain.descriptorPool;
-    allocateInfo.descriptorSetCount = 1;
-    allocateInfo.pSetLayouts = &_descriptorSetLayout;
+    allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    allocateInfo.pSetLayouts = layouts.data();
 
-    util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, &_descriptorSet),
+    util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, _descriptorSets.data()),
                     "Failed allocating descriptor sets!");
 
-    vk::DescriptorImageInfo imageInfo{};
-    imageInfo.sampler = *_sampler;
-    imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    imageInfo.imageView = _hdri.imageView;
+    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        vk::DescriptorImageInfo imageInfo{};
+        imageInfo.sampler = *_sampler;
+        imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        imageInfo.imageView = _hdrTarget.imageViews[i];
 
-    vk::WriteDescriptorSet descriptorWrite{};
-    descriptorWrite.dstSet = _descriptorSet;
-    descriptorWrite.dstBinding = 0;
-    descriptorWrite.dstArrayElement = 0;
-    descriptorWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    descriptorWrite.descriptorCount = 1;
-    descriptorWrite.pImageInfo = &imageInfo;
+        std::array<vk::WriteDescriptorSet, 1> descriptorWrites{};
+        descriptorWrites[0].dstSet = _descriptorSets[i];
+        descriptorWrites[0].dstBinding = 0;
+        descriptorWrites[0].dstArrayElement = 0;
+        descriptorWrites[0].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pImageInfo = &imageInfo;
 
-    _brain.device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+        _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+    }
 }

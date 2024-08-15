@@ -1,13 +1,10 @@
 #include "pipelines/lighting_pipeline.hpp"
 #include "shaders/shader_loader.hpp"
-#include "imgui.h"
-#include "imgui_impl_vulkan.h"
 
-
-LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const SwapChain& swapChain) :
+LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget) :
     _brain(brain),
     _gBuffers(gBuffers),
-    _swapChain(swapChain)
+    _hdrTarget(hdrTarget)
 {
     _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear);
     CreateDescriptorSetLayout();
@@ -15,10 +12,10 @@ LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBu
     CreatePipeline();
 }
 
-void LightingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame, uint32_t swapChainIndex)
+void LightingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame)
 {
     vk::RenderingAttachmentInfoKHR finalColorAttachmentInfo{};
-    finalColorAttachmentInfo.imageView = _swapChain.GetImageView(swapChainIndex);
+    finalColorAttachmentInfo.imageView = _hdrTarget.imageViews[currentFrame];
     finalColorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
     finalColorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
     finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eLoad;
@@ -40,11 +37,8 @@ void LightingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
 
     commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 0, nullptr);
 
-    // Fullscreen quad.
+    // Fullscreen triangle.
     commandBuffer.draw(3, 1, 0, 0);
-
-    // TODO: Place more accordingly later.
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
     commandBuffer.endRenderingKHR(_brain.dldi);
     util::EndLabel(commandBuffer, _brain.dldi);
@@ -159,8 +153,7 @@ void LightingPipeline::CreatePipeline()
 
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
     pipelineRenderingCreateInfoKhr.colorAttachmentCount = 1;
-    vk::Format format = _swapChain.GetFormat();
-    pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &format;
+    pipelineRenderingCreateInfoKhr.pColorAttachmentFormats = &_hdrTarget.format;
 
     pipelineCreateInfo.pNext = &pipelineRenderingCreateInfoKhr;
     pipelineCreateInfo.renderPass = nullptr; // Using dynamic rendering.

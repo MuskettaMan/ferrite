@@ -1,19 +1,23 @@
 #pragma once
 
-#include "application.hpp"
 #include "swap_chain.hpp"
 #include <glm/glm.hpp>
 #include "engine_init_info.hpp"
 #include "performance_tracker.hpp"
 #include "mesh.hpp"
-#include "vulkan_brain.hpp"
-#include "gbuffers.hpp"
 #include "include.hpp"
-#include "pipelines/geometry_pipeline.hpp"
-#include "pipelines/lighting_pipeline.hpp"
-#include "pipelines/skydome_pipeline.hpp"
-#include "model_loader.hpp"
 #include "camera.hpp"
+#include "hdr_target.hpp"
+
+class Application;
+class GeometryPipeline;
+class LightingPipeline;
+class SkydomePipeline;
+class TonemappingPipeline;
+class SwapChain;
+class GBuffers;
+class VulkanBrain;
+class ModelLoader;
 
 class Engine
 {
@@ -33,6 +37,7 @@ private:
     std::unique_ptr<GeometryPipeline> _geometryPipeline;
     std::unique_ptr<LightingPipeline> _lightingPipeline;
     std::unique_ptr<SkydomePipeline> _skydomePipeline;
+    std::unique_ptr<TonemappingPipeline> _tonemappingPipeline;
     std::unique_ptr<ModelLoader> _modelLoader;
 
     SceneDescription _scene;
@@ -43,6 +48,8 @@ private:
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _imageAvailableSemaphores;
     std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> _renderFinishedSemaphores;
     std::array<vk::Fence, MAX_FRAMES_IN_FLIGHT> _inFlightFences;
+
+    HDRTarget _hdrTarget;
 
     CameraStructure _cameraStructure;
 
@@ -60,4 +67,5 @@ private:
     void InitializeCameraUBODescriptors();
     void UpdateCameraDescriptorSet(uint32_t currentFrame);
     CameraUBO CalculateCamera(const Camera& camera);
+    void InitializeHDRTarget();
 };

@@ -376,6 +376,8 @@ namespace util
     static void CreateTextureImage(const VulkanBrain& brain, const Texture& texture, TextureHandle& textureHandle)
     {
         vk::DeviceSize imageSize = texture.width * texture.height * texture.numChannels;
+        if(texture.isHDR)
+            imageSize *= sizeof(float);
 
         vk::Buffer stagingBuffer;
         VmaAllocation stagingBufferAllocation;

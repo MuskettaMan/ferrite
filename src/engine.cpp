@@ -18,8 +18,14 @@
 #include "stopwatch.hpp"
 #include "model_loader.hpp"
 #include "util.hpp"
-#include "vulkan_brain.hpp"
 #include "mesh_primitives.hpp"
+#include "pipelines/geometry_pipeline.hpp"
+#include "pipelines/lighting_pipeline.hpp"
+#include "pipelines/skydome_pipeline.hpp"
+#include "pipelines/tonemapping_pipeline.hpp"
+#include "model_loader.hpp"
+#include "gbuffers.hpp"
+#include "application.hpp"
 
 Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> application) :
     _brain(initInfo)
@@ -30,16 +36,19 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
     _application = std::move(application);
 
+    _swapChain = std::make_unique<SwapChain>(_brain, glm::uvec2{ initInfo.width, initInfo.height });
+
     CreateDescriptorSetLayout();
     InitializeCameraUBODescriptors();
+    InitializeHDRTarget();
 
     _modelLoader = std::make_unique<ModelLoader>(_brain, _materialDescriptorSetLayout);
 
-    _swapChain = std::make_unique<SwapChain>(_brain, glm::uvec2{ initInfo.width, initInfo.height });
     _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
     _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout, _cameraStructure);
-    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, *_swapChain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32)), _cameraStructure);
-    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, *_swapChain);
+    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32)), _cameraStructure, _hdrTarget);
+    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget);
+    _tonemappingPipeline = std::make_unique<TonemappingPipeline>(_brain, _hdrTarget, *_swapChain);
 
     CreateCommandBuffers();
     CreateSyncObjects();
@@ -236,6 +245,12 @@ Engine::~Engine()
         vmaDestroyBuffer(_brain.vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
     }
 
+    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        _brain.device.destroy(_hdrTarget.imageViews[i]);
+        vmaDestroyImage(_brain.vmaAllocator, _hdrTarget.images[i], _hdrTarget.allocations[i]);
+    }
+
     _brain.device.destroy(_cameraStructure.descriptorSetLayout);
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
@@ -265,7 +280,7 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     util::VK_ASSERT(commandBuffer.begin(&commandBufferBeginInfo), "Failed to begin recording command buffer!");
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
-
+    util::TransitionImageLayout(commandBuffer, _hdrTarget.images[_currentFrame], _hdrTarget.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
     util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),
                                 _gBuffers->GBufferFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
@@ -277,9 +292,12 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
                                 _gBuffers->GBufferFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
-    _skydomePipeline->RecordCommands(commandBuffer, _currentFrame, swapChainImageIndex);
+    _skydomePipeline->RecordCommands(commandBuffer, _currentFrame);
+    _lightingPipeline->RecordCommands(commandBuffer, _currentFrame);
 
-    _lightingPipeline->RecordCommands(commandBuffer, _currentFrame, swapChainImageIndex);
+    util::TransitionImageLayout(commandBuffer, _hdrTarget.images[_currentFrame], _hdrTarget.format, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+
+    _tonemappingPipeline->RecordCommands(commandBuffer, _currentFrame, swapChainImageIndex);
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR);
 
@@ -391,4 +409,25 @@ CameraUBO Engine::CalculateCamera(const Camera& camera)
     ubo.cameraPosition = camera.position;
 
     return ubo;
+}
+
+void Engine::InitializeHDRTarget()
+{
+    _hdrTarget.format = vk::Format::eR32G32B32A32Sfloat;
+    _hdrTarget.size = _swapChain->GetImageSize();
+    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    {
+        util::CreateImage(_brain.vmaAllocator, _hdrTarget.size.x, _hdrTarget.size.y, _hdrTarget.format,
+                          vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+                          _hdrTarget.images[i], _hdrTarget.allocations[i], "HDR Target");
+        util::NameObject(_hdrTarget.images[i], "[IMAGE] HDR Target", _brain.device, _brain.dldi);
+
+        _hdrTarget.imageViews[i] = util::CreateImageView(_brain.device, _hdrTarget.images[i], _hdrTarget.format, vk::ImageAspectFlagBits::eColor);
+        util::NameObject(_hdrTarget.imageViews[i], "HDR Target View", _brain.device, _brain.dldi);
+
+        vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
+        util::TransitionImageLayout(cb, _hdrTarget.images[i], _hdrTarget.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+        util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
+    }
+
 }
