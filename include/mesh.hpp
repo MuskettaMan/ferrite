@@ -56,7 +56,7 @@ struct Texture
         if(isHDR)
             return vk::Format::eR32G32B32A32Sfloat;
 
-        return vk::Format::eR8G8B8A8Srgb;
+        return vk::Format::eR8G8B8A8Unorm;
     }
 };
 

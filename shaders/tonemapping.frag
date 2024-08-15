@@ -25,5 +25,7 @@ void main()
     // Aces
     //vec3 mapped = aces(hdrColor);
 
+    mapped = pow(mapped, vec3(1.0 / 2.2));
+
     outColor = vec4(mapped, 1.0);
 }

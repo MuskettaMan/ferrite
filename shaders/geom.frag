@@ -41,7 +41,7 @@ void main()
     vec4 emissiveSample = vec4(0.0);
     if(materialInfoUBO.useAlbedoMap)
     {
-        albedoSample = texture(sampler2D(albedoImage, imageSampler), texCoord);
+        albedoSample = pow(texture(sampler2D(albedoImage, imageSampler), texCoord), vec4(2.2));
     }
     if(materialInfoUBO.useMRMap)
     {
@@ -57,7 +57,7 @@ void main()
     }
     if(materialInfoUBO.useEmissiveMap)
     {
-        emissiveSample = texture(sampler2D(emissiveImage, imageSampler), texCoord);
+        emissiveSample = pow(texture(sampler2D(emissiveImage, imageSampler), texCoord), vec4(2.2));
     }
 
     outAlbedoM = vec4(albedoSample.rgb, mrSample.r);
