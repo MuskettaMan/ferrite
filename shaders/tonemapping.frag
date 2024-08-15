@@ -15,16 +15,20 @@ vec3 aces(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
+const float exposure = 0.3;
+
 void main()
 {
     vec3 hdrColor = texture(hdrTarget, texCoords).rgb;
 
     // Reinhardt
-    vec3 mapped = hdrColor / (hdrColor + vec3(1.0));
+    //vec3 mapped = hdrColor / (hdrColor + vec3(1.0));
+    vec3 mapped = vec3(1.0) - exp(-hdrColor * exposure);
 
     // Aces
     //vec3 mapped = aces(hdrColor);
 
+    // Gamma correction
     mapped = pow(mapped, vec3(1.0 / 2.2));
 
     outColor = vec4(mapped, 1.0);
