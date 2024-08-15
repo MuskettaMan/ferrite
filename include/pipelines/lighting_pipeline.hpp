@@ -9,7 +9,7 @@
 class LightingPipeline
 {
 public:
-    LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget);
+    LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget, const CameraStructure& camera);
     ~LightingPipeline();
 
     void RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame);
@@ -31,6 +31,7 @@ private:
     const VulkanBrain& _brain;
     const GBuffers& _gBuffers;
     const HDRTarget& _hdrTarget;
+    const CameraStructure& _camera;
 
     vk::DescriptorSetLayout _descriptorSetLayout;
     vk::PipelineLayout _pipelineLayout;

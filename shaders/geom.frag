@@ -66,8 +66,8 @@ void main()
         emissiveSample = pow(texture(sampler2D(emissiveImage, imageSampler), texCoord), vec4(2.2));
     }
 
-    outAlbedoM = vec4(albedoSample.rgb, mrSample.r);
-    outEmissiveAO = vec4(emissiveSample.rgb, occlusionSample.r);
+    outAlbedoM = vec4(albedoSample.rgb, mrSample.g);
+    outEmissiveAO = vec4(emissiveSample.rgb, occlusionSample.b);
     outNormalR = vec4(normalize(normal), mrSample.g);
 
     outPosition = vec4(position, 1.0);

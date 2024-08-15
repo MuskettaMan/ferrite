@@ -1,10 +1,11 @@
 #include "pipelines/lighting_pipeline.hpp"
 #include "shaders/shader_loader.hpp"
 
-LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget) :
+LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget, const CameraStructure& camera) :
     _brain(brain),
     _gBuffers(gBuffers),
-    _hdrTarget(hdrTarget)
+    _hdrTarget(hdrTarget),
+    _camera(camera)
 {
     _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear);
     CreateDescriptorSetLayout();
@@ -36,6 +37,7 @@ void LightingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pipeline);
 
     commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 0, nullptr);
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &_camera.descriptorSets[currentFrame], 0, nullptr);
 
     // Fullscreen triangle.
     commandBuffer.draw(3, 1, 0, 0);
@@ -54,9 +56,11 @@ LightingPipeline::~LightingPipeline()
 
 void LightingPipeline::CreatePipeline()
 {
+    std::array<vk::DescriptorSetLayout, 2> descriptorLayouts = { _descriptorSetLayout, _camera.descriptorSetLayout };
+
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &_descriptorSetLayout;
+    pipelineLayoutCreateInfo.setLayoutCount = descriptorLayouts.size();
+    pipelineLayoutCreateInfo.pSetLayouts = descriptorLayouts.data();
     pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
     pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 

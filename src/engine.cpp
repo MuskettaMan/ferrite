@@ -47,14 +47,14 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
     _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout, _cameraStructure);
     _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32)), _cameraStructure, _hdrTarget);
-    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget);
+    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure);
     _tonemappingPipeline = std::make_unique<TonemappingPipeline>(_brain, _hdrTarget, *_swapChain);
 
     CreateCommandBuffers();
     CreateSyncObjects();
 
     _scene.model = _modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
-    //_model = modelLoader.Load("assets/models/DamagedHelmet.glb");
+    //_scene.model = _modelLoader->Load("assets/models/DamagedHelmet.glb");
 
     vk::Format format = _swapChain->GetFormat();
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
