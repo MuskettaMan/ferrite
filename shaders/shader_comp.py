@@ -6,7 +6,7 @@ import sys
 base_dir = os.path.dirname(os.path.realpath(__file__))
 
 # Set the path to the glslc compiler
-glslc_path = "C:/VulkanSDK/1.3.283.0/Bin/glslc.exe"
+glslc_path = "C:/VulkanSDK/1.3.290.0/Bin/glslc.exe"
 
 # List of shader extensions and their corresponding output suffixes
 shader_types = {
