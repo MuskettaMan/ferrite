@@ -19,11 +19,6 @@ public:
     NON_COPYABLE(LightingPipeline);
 
 private:
-    struct FrameData
-    {
-        vk::DescriptorSet descriptorSet;
-    };
-
     void CreatePipeline();
     void CreateDescriptorSetLayout();
     void CreateDescriptorSets();
@@ -34,10 +29,9 @@ private:
     const CameraStructure& _camera;
 
     vk::DescriptorSetLayout _descriptorSetLayout;
+    vk::DescriptorSet _descriptorSet;
     vk::PipelineLayout _pipelineLayout;
     vk::Pipeline _pipeline;
 
     vk::UniqueSampler _sampler;
-
-    std::array<FrameData, MAX_FRAMES_IN_FLIGHT> _frameData;
 };

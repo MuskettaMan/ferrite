@@ -245,11 +245,8 @@ Engine::~Engine()
         vmaDestroyBuffer(_brain.vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
     }
 
-    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-    {
-        _brain.device.destroy(_hdrTarget.imageViews[i]);
-        vmaDestroyImage(_brain.vmaAllocator, _hdrTarget.images[i], _hdrTarget.allocations[i]);
-    }
+    _brain.device.destroy(_hdrTarget.imageViews);
+    vmaDestroyImage(_brain.vmaAllocator, _hdrTarget.images, _hdrTarget.allocations);
 
     _brain.device.destroy(_cameraStructure.descriptorSetLayout);
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
@@ -280,22 +277,22 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
     util::VK_ASSERT(commandBuffer.begin(&commandBufferBeginInfo), "Failed to begin recording command buffer!");
 
     util::TransitionImageLayout(commandBuffer, _swapChain->GetImage(swapChainImageIndex), _swapChain->GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
-    util::TransitionImageLayout(commandBuffer, _hdrTarget.images[_currentFrame], _hdrTarget.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
-    util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),
+    util::TransitionImageLayout(commandBuffer, _hdrTarget.images, _hdrTarget.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+    util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(),
                                 _gBuffers->GBufferFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
     _geometryPipeline->RecordCommands(commandBuffer, _currentFrame, _scene);
 
 
-    util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(_currentFrame),
+    util::TransitionImageLayout(commandBuffer, _gBuffers->GBuffersImageArray(),
                                 _gBuffers->GBufferFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
     _skydomePipeline->RecordCommands(commandBuffer, _currentFrame);
     _lightingPipeline->RecordCommands(commandBuffer, _currentFrame);
 
-    util::TransitionImageLayout(commandBuffer, _hdrTarget.images[_currentFrame], _hdrTarget.format, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+    util::TransitionImageLayout(commandBuffer, _hdrTarget.images, _hdrTarget.format, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
 
     _tonemappingPipeline->RecordCommands(commandBuffer, _currentFrame, swapChainImageIndex);
 
@@ -415,19 +412,16 @@ void Engine::InitializeHDRTarget()
 {
     _hdrTarget.format = vk::Format::eR32G32B32A32Sfloat;
     _hdrTarget.size = _swapChain->GetImageSize();
-    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-    {
-        util::CreateImage(_brain.vmaAllocator, _hdrTarget.size.x, _hdrTarget.size.y, _hdrTarget.format,
-                          vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-                          _hdrTarget.images[i], _hdrTarget.allocations[i], "HDR Target");
-        util::NameObject(_hdrTarget.images[i], "[IMAGE] HDR Target", _brain.device, _brain.dldi);
 
-        _hdrTarget.imageViews[i] = util::CreateImageView(_brain.device, _hdrTarget.images[i], _hdrTarget.format, vk::ImageAspectFlagBits::eColor);
-        util::NameObject(_hdrTarget.imageViews[i], "HDR Target View", _brain.device, _brain.dldi);
+    util::CreateImage(_brain.vmaAllocator, _hdrTarget.size.x, _hdrTarget.size.y, _hdrTarget.format,
+                      vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+                      _hdrTarget.images, _hdrTarget.allocations, "HDR Target");
+    util::NameObject(_hdrTarget.images, "[IMAGE] HDR Target", _brain.device, _brain.dldi);
 
-        vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
-        util::TransitionImageLayout(cb, _hdrTarget.images[i], _hdrTarget.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
-        util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
-    }
+    _hdrTarget.imageViews = util::CreateImageView(_brain.device, _hdrTarget.images, _hdrTarget.format, vk::ImageAspectFlagBits::eColor);
+    util::NameObject(_hdrTarget.imageViews, "HDR Target View", _brain.device, _brain.dldi);
 
+    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
+    util::TransitionImageLayout(cb, _hdrTarget.images, _hdrTarget.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
 }

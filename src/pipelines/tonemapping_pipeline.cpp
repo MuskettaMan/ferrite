@@ -210,7 +210,7 @@ void TonemappingPipeline::CreateDescriptorSets()
         vk::DescriptorImageInfo imageInfo{};
         imageInfo.sampler = *_sampler;
         imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        imageInfo.imageView = _hdrTarget.imageViews[i];
+        imageInfo.imageView = _hdrTarget.imageViews;
 
         std::array<vk::WriteDescriptorSet, 1> descriptorWrites{};
         descriptorWrites[0].dstSet = _descriptorSets[i];

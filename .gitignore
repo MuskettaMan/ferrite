@@ -56,3 +56,5 @@ build/**/*
 lib/*
 bin/*
 test/test_runner
+
+imgui.ini

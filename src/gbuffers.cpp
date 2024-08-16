@@ -40,23 +40,20 @@ void GBuffers::Resize(glm::uvec2 size)
 void GBuffers::CreateGBuffers()
 {
     auto format = GBufferFormat();
-    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    util::CreateImage(_brain.vmaAllocator, _size.x, _size.y, format,
+                      vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+                      _gBuffersImageArray, _gBufferAllocation, "GBuffer array", DEFERRED_ATTACHMENT_COUNT);
+    util::NameObject(_gBuffersImageArray, "[IMAGE] GBuffer Array", _brain.device, _brain.dldi);
+
+    for(size_t i = 0; i < DEFERRED_ATTACHMENT_COUNT; ++i)
     {
-        util::CreateImage(_brain.vmaAllocator, _size.x, _size.y, format,
-                          vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-                          _gBuffersImageArray[i], _gBufferAllocation[i], "GBuffer array", DEFERRED_ATTACHMENT_COUNT);
-        util::NameObject(_gBuffersImageArray[i], "[IMAGE] GBuffer Array", _brain.device, _brain.dldi);
-
-        for(size_t j = 0; j < DEFERRED_ATTACHMENT_COUNT; ++j)
-        {
-            _gBufferViews[i][j] = util::CreateImageView(_brain.device, _gBuffersImageArray[i], format, vk::ImageAspectFlagBits::eColor, j);
-            util::NameObject(_gBufferViews[i][j], _names[j], _brain.device, _brain.dldi);
-        }
-
-        vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
-        util::TransitionImageLayout(cb, _gBuffersImageArray[i], format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, DEFERRED_ATTACHMENT_COUNT);
-        util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
+        _gBufferViews[i] = util::CreateImageView(_brain.device, _gBuffersImageArray, format, vk::ImageAspectFlagBits::eColor, i);
+        util::NameObject(_gBufferViews[i], _names[i], _brain.device, _brain.dldi);
     }
+
+    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
+    util::TransitionImageLayout(cb, _gBuffersImageArray, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, DEFERRED_ATTACHMENT_COUNT);
+    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
 }
 
 void GBuffers::CreateDepthResources()
@@ -75,12 +72,9 @@ void GBuffers::CreateDepthResources()
 
 void GBuffers::CleanUp()
 {
-    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-    {
-        vmaDestroyImage(_brain.vmaAllocator, _gBuffersImageArray[i], _gBufferAllocation[i]);
-        for(size_t j = 0; j < DEFERRED_ATTACHMENT_COUNT; ++j)
-            _brain.device.destroy(_gBufferViews[i][j]);
-    }
+    vmaDestroyImage(_brain.vmaAllocator, _gBuffersImageArray, _gBufferAllocation);
+    for(size_t i = 0; i < DEFERRED_ATTACHMENT_COUNT; ++i)
+        _brain.device.destroy(_gBufferViews[i]);
 
     _brain.device.destroy(_depthImageView);
     vmaDestroyImage(_brain.vmaAllocator, _depthImage, _depthImageAllocation);

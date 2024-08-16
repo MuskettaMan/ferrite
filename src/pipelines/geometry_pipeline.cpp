@@ -34,7 +34,7 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
     for(size_t i = 0; i < colorAttachmentInfos.size(); ++i)
     {
         vk::RenderingAttachmentInfoKHR& info{ colorAttachmentInfos[i] };
-        info.imageView = _gBuffers.GBufferView(currentFrame, i);
+        info.imageView = _gBuffers.GBufferView(i);
         info.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
         info.storeOp = vk::AttachmentStoreOp::eStore;
         info.loadOp = vk::AttachmentLoadOp::eClear;

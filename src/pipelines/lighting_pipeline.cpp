@@ -16,7 +16,7 @@ LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBu
 void LightingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame)
 {
     vk::RenderingAttachmentInfoKHR finalColorAttachmentInfo{};
-    finalColorAttachmentInfo.imageView = _hdrTarget.imageViews[currentFrame];
+    finalColorAttachmentInfo.imageView = _hdrTarget.imageViews;
     finalColorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
     finalColorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
     finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eLoad;
@@ -36,7 +36,7 @@ void LightingPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pipeline);
 
-    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 0, nullptr);
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_descriptorSet, 0, nullptr);
     commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &_camera.descriptorSets[currentFrame], 0, nullptr);
 
     // Fullscreen triangle.
@@ -201,55 +201,46 @@ void LightingPipeline::CreateDescriptorSetLayout()
 
 void LightingPipeline::CreateDescriptorSets()
 {
-    std::array<vk::DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT> layouts{};
-    std::for_each(layouts.begin(), layouts.end(), [this](auto& l) { l = _descriptorSetLayout; });
     vk::DescriptorSetAllocateInfo allocateInfo{};
     allocateInfo.descriptorPool = _brain.descriptorPool;
-    allocateInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    allocateInfo.pSetLayouts = layouts.data();
+    allocateInfo.descriptorSetCount = 1;
+    allocateInfo.pSetLayouts = &_descriptorSetLayout;
 
-    std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets;
-
-    util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, descriptorSets.data()),
+    util::VK_ASSERT(_brain.device.allocateDescriptorSets(&allocateInfo, &_descriptorSet),
                     "Failed allocating descriptor sets!");
-    for (size_t i = 0; i < descriptorSets.size(); ++i)
-        _frameData[i].descriptorSet = descriptorSets[i];
 
     UpdateGBufferViews();
 }
 
 void LightingPipeline::UpdateGBufferViews()
 {
-    for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+    vk::DescriptorImageInfo samplerInfo{};
+    samplerInfo.sampler = *_sampler;
+
+    std::array<vk::DescriptorImageInfo, DEFERRED_ATTACHMENT_COUNT> imageInfo{};
+    for(size_t i = 0; i < imageInfo.size(); ++i)
     {
-        vk::DescriptorImageInfo samplerInfo{};
-        samplerInfo.sampler = *_sampler;
-
-        std::array<vk::DescriptorImageInfo, DEFERRED_ATTACHMENT_COUNT> imageInfo{};
-        for(size_t j = 0; j < imageInfo.size(); ++j)
-        {
-            imageInfo[j].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-            imageInfo[j].imageView = _gBuffers.GBufferView(i, j);
-        }
-
-        std::array<vk::WriteDescriptorSet, DEFERRED_ATTACHMENT_COUNT + 1> descriptorWrites{};
-        descriptorWrites[0].dstSet = _frameData[i].descriptorSet;
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = vk::DescriptorType::eSampler;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pImageInfo = &samplerInfo;
-
-        for(size_t j = 1; j < descriptorWrites.size(); ++j)
-        {
-            descriptorWrites[j].dstSet = _frameData[i].descriptorSet;
-            descriptorWrites[j].dstBinding = j;
-            descriptorWrites[j].dstArrayElement = 0;
-            descriptorWrites[j].descriptorType = vk::DescriptorType::eSampledImage;
-            descriptorWrites[j].descriptorCount = 1;
-            descriptorWrites[j].pImageInfo = &imageInfo[j - 1];
-        }
-
-        _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+        imageInfo[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        imageInfo[i].imageView = _gBuffers.GBufferView(i);
     }
+
+    std::array<vk::WriteDescriptorSet, DEFERRED_ATTACHMENT_COUNT + 1> descriptorWrites{};
+    descriptorWrites[0].dstSet = _descriptorSet;
+    descriptorWrites[0].dstBinding = 0;
+    descriptorWrites[0].dstArrayElement = 0;
+    descriptorWrites[0].descriptorType = vk::DescriptorType::eSampler;
+    descriptorWrites[0].descriptorCount = 1;
+    descriptorWrites[0].pImageInfo = &samplerInfo;
+
+    for(size_t i = 1; i < descriptorWrites.size(); ++i)
+    {
+        descriptorWrites[i].dstSet = _descriptorSet;
+        descriptorWrites[i].dstBinding = i;
+        descriptorWrites[i].dstArrayElement = 0;
+        descriptorWrites[i].descriptorType = vk::DescriptorType::eSampledImage;
+        descriptorWrites[i].descriptorCount = 1;
+        descriptorWrites[i].pImageInfo = &imageInfo[i - 1];
+    }
+
+    _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }

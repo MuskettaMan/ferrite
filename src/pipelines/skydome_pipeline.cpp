@@ -47,7 +47,7 @@ SkydomePipeline::~SkydomePipeline()
 void SkydomePipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame)
 {
     vk::RenderingAttachmentInfoKHR finalColorAttachmentInfo{};
-    finalColorAttachmentInfo.imageView = _hdrTarget.imageViews[currentFrame];
+    finalColorAttachmentInfo.imageView = _hdrTarget.imageViews;
     finalColorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimalKHR;
     finalColorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
     finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;

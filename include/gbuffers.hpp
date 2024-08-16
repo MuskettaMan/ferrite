@@ -20,13 +20,10 @@ public:
 
     void Resize(glm::uvec2 size);
 
-    const std::array<vk::Image, MAX_FRAMES_IN_FLIGHT>& GBuffersImageArray() const { return _gBuffersImageArray; }
-    const std::array<VmaAllocation, MAX_FRAMES_IN_FLIGHT>& GBufferAllocation() const { return _gBufferAllocation; }
-    const std::array<std::array<vk::ImageView, DEFERRED_ATTACHMENT_COUNT>, MAX_FRAMES_IN_FLIGHT>& GBufferViews() const { return _gBufferViews; }
-    vk::Image GBuffersImageArray(uint32_t index) const { return _gBuffersImageArray[index]; }
-    VmaAllocation GBufferAllocation(uint32_t index) const { return _gBufferAllocation[index]; }
-    const std::array<vk::ImageView, DEFERRED_ATTACHMENT_COUNT>& GBufferViews(uint32_t index) const  { return _gBufferViews[index]; }
-    vk::ImageView GBufferView(uint32_t frameIndex, uint32_t viewIndex) const { return _gBufferViews[frameIndex][viewIndex]; }
+    vk::Image GBuffersImageArray() const { return _gBuffersImageArray; }
+    VmaAllocation GBufferAllocation() const { return _gBufferAllocation; }
+    const std::array<vk::ImageView, DEFERRED_ATTACHMENT_COUNT>& GBufferViews() const  { return _gBufferViews; }
+    vk::ImageView GBufferView(uint32_t viewIndex) const { return _gBufferViews[viewIndex]; }
     vk::Format DepthFormat() const { return _depthFormat; }
     glm::uvec2 Size() const { return _size; }
     vk::Image DepthImage() const { return _depthImage; }
@@ -40,9 +37,9 @@ private:
     const VulkanBrain& _brain;
     glm::uvec2 _size;
 
-    std::array<vk::Image, MAX_FRAMES_IN_FLIGHT> _gBuffersImageArray;
-    std::array<VmaAllocation, MAX_FRAMES_IN_FLIGHT> _gBufferAllocation;
-    std::array<std::array<vk::ImageView, DEFERRED_ATTACHMENT_COUNT>, MAX_FRAMES_IN_FLIGHT> _gBufferViews;
+    vk::Image _gBuffersImageArray;
+    VmaAllocation _gBufferAllocation;
+    std::array<vk::ImageView, DEFERRED_ATTACHMENT_COUNT> _gBufferViews;
 
     vk::Image _depthImage;
     VmaAllocation _depthImageAllocation;
