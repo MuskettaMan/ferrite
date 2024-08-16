@@ -10,7 +10,8 @@ ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout mater
     _parser(),
     _materialDescriptorSetLayout(materialDescriptorSetLayout)
 {
-    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear);
+
+    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear, static_cast<uint32_t>(floor(log2(2048))));
 
     Texture texture;
     texture.width = 2;
@@ -20,7 +21,7 @@ ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout mater
     std::array<std::shared_ptr<TextureHandle>, 5> textures;
     std::for_each(textures.begin(), textures.end(), [&texture, this](auto& ptr){
         ptr = std::make_shared<TextureHandle>();
-        util::CreateTextureImage(_brain, texture, *ptr);
+        util::CreateTextureImage(_brain, texture, *ptr, false);
     });
 
     MaterialHandle::MaterialInfo info;
@@ -368,7 +369,7 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         textureHandle.width = texture.width;
         textureHandle.height = texture.height;
 
-        util::CreateTextureImage(_brain, texture, textureHandle);
+        util::CreateTextureImage(_brain, texture, textureHandle, true);
 
         modelHandle.textures.emplace_back(std::make_shared<TextureHandle>(textureHandle));
     }

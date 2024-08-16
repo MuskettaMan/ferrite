@@ -9,7 +9,7 @@ TonemappingPipeline::TonemappingPipeline(const VulkanBrain& brain, const HDRTarg
     _hdrTarget(hdrTarget),
     _swapChain(_swapChain)
 {
-    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear);
+    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear, 1);
     CreateDescriptorSetLayout();
     CreateDescriptorSets();
     CreatePipeline();

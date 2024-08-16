@@ -415,7 +415,7 @@ void Engine::InitializeHDRTarget()
 
     util::CreateImage(_brain.vmaAllocator, _hdrTarget.size.x, _hdrTarget.size.y, _hdrTarget.format,
                       vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-                      _hdrTarget.images, _hdrTarget.allocations, "HDR Target");
+                      _hdrTarget.images, _hdrTarget.allocations, "HDR Target", false);
     util::NameObject(_hdrTarget.images, "[IMAGE] HDR Target", _brain.device, _brain.dldi);
 
     _hdrTarget.imageViews = util::CreateImageView(_brain.device, _hdrTarget.images, _hdrTarget.format, vk::ImageAspectFlagBits::eColor);

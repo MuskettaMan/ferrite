@@ -7,7 +7,7 @@ LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBu
     _hdrTarget(hdrTarget),
     _camera(camera)
 {
-    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear);
+    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear, 1);
     CreateDescriptorSetLayout();
     CreateDescriptorSets();
     CreatePipeline();

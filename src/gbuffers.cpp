@@ -42,7 +42,7 @@ void GBuffers::CreateGBuffers()
     auto format = GBufferFormat();
     util::CreateImage(_brain.vmaAllocator, _size.x, _size.y, format,
                       vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-                      _gBuffersImageArray, _gBufferAllocation, "GBuffer array", DEFERRED_ATTACHMENT_COUNT);
+                      _gBuffersImageArray, _gBufferAllocation, "GBuffer array", false, DEFERRED_ATTACHMENT_COUNT);
     util::NameObject(_gBuffersImageArray, "[IMAGE] GBuffer Array", _brain.device, _brain.dldi);
 
     for(size_t i = 0; i < DEFERRED_ATTACHMENT_COUNT; ++i)
@@ -61,7 +61,7 @@ void GBuffers::CreateDepthResources()
     util::CreateImage(_brain.vmaAllocator, _size.x, _size.y,
                       _depthFormat, vk::ImageTiling::eOptimal,
                       vk::ImageUsageFlagBits::eDepthStencilAttachment,
-                      _depthImage, _depthImageAllocation, "Depth image");
+                      _depthImage, _depthImageAllocation, "Depth image", false);
 
     _depthImageView = util::CreateImageView(_brain.device, _depthImage, _depthFormat, vk::ImageAspectFlagBits::eDepth);
 

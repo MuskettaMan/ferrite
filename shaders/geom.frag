@@ -25,13 +25,14 @@ layout(set = 2, binding = 6) uniform MaterialInfoUBO
     float normalScale;
     float occlusionStrength;
 
+    vec3 emissiveFactor;
+    bool useEmissiveMap;
+
     bool useAlbedoMap;
     bool useMRMap;
     bool useNormalMap;
     bool useOcclusionMap;
-
-    vec3 emissiveFactor;
-    bool useEmissiveMap;
+    float _padding1;
 } materialInfoUBO;
 
 void main()

@@ -107,26 +107,23 @@ struct TextureHandle
 
 struct MaterialHandle
 {
-    struct MaterialInfo
+    struct alignas(16) MaterialInfo
     {
-        alignas(16)
         glm::vec4 albedoFactor{0.0f};
 
-        alignas(16)
         float metallicFactor{0.0f};
         float roughnessFactor{0.0f};
         float normalScale{0.0f};
         float occlusionStrength{0.0f};
 
-        alignas(16)
-        bool useAlbedoMap{false};
-        bool useMRMap{false};
-        bool useNormalMap{false};
-        bool useOcclusionMap{false};
-
-        alignas(16)
         glm::vec3 emissiveFactor{0.0f};
-        bool useEmissiveMap{false};
+        int32_t useEmissiveMap{false};
+
+        int32_t useAlbedoMap{false};
+        int32_t useMRMap{false};
+        int32_t useNormalMap{false};
+        int32_t useOcclusionMap{false};
+        float _padding1;
     };
 
     const static uint32_t TEXTURE_COUNT = 5;
