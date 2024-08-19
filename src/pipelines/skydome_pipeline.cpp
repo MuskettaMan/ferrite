@@ -1,6 +1,7 @@
 #include "pipelines/skydome_pipeline.hpp"
 #include "shaders/shader_loader.hpp"
 #include "hdr_target.hpp"
+#include "single_time_commands.hpp"
 
 SkydomePipeline::SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&& sphere, const CameraStructure& camera, const HDRTarget& hdrTarget) :
     _brain(brain),
@@ -21,9 +22,9 @@ SkydomePipeline::SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&&
 
     stbi_image_free(data);
 
-    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
-    util::CreateTextureImage(_brain, cb, texture, _hdri, false);
-    util::EndSingleTimeCommands(_brain, cb);
+    SingleTimeCommands commandBuffer{ _brain };
+    commandBuffer.CreateTextureImage(texture, _hdri, false);
+    commandBuffer.Submit();
 
     util::NameObject(_hdri.image, "Skydome HDRI", _brain.device, _brain.dldi);
 

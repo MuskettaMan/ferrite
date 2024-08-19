@@ -26,28 +26,10 @@ namespace util
     vk::CommandBuffer BeginSingleTimeCommands(const VulkanBrain& brain);
     void EndSingleTimeCommands(const VulkanBrain& brain, vk::CommandBuffer commandBuffer);
     void CopyBuffer(vk::CommandBuffer commandBuffer, vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
-    template <typename T>
-    static void CreateLocalBuffer(const VulkanBrain& brain, vk::CommandBuffer commandBuffer, const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage, std::string_view name)
-    {
-        vk::DeviceSize bufferSize = vec.size() * sizeof(T);
-
-        vk::Buffer stagingBuffer;
-        VmaAllocation stagingBufferAllocation;
-        CreateBuffer(brain, bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Staging buffer");
-
-        vmaCopyMemoryToAllocation(brain.vmaAllocator, vec.data(), stagingBufferAllocation, 0, bufferSize);
-
-        CreateBuffer(brain, bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation, name.data());
-
-        CopyBuffer(commandBuffer, stagingBuffer, buffer, bufferSize);
-        brain.device.destroy(stagingBuffer, nullptr);
-        vmaFreeMemory(brain.vmaAllocator, stagingBufferAllocation);
-    }
     MaterialHandle CreateMaterial(const VulkanBrain& brain, const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info, vk::Sampler sampler, vk::DescriptorSetLayout materialLayout, std::shared_ptr<MaterialHandle> defaultMaterial = nullptr);
     vk::UniqueSampler CreateSampler(const VulkanBrain& brain, vk::Filter min, vk::Filter mag, vk::SamplerAddressMode addressingMode, vk::SamplerMipmapMode mipmapMode, uint32_t mipLevels);
     void TransitionImageLayout(vk::CommandBuffer commandBuffer, vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t numLayers = 1, uint32_t mipLevel = 0, uint32_t mipCount = 1);
     void CopyBufferToImage(vk::CommandBuffer commandBuffer, vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
-    void CreateTextureImage(const VulkanBrain& brain, vk::CommandBuffer commandBuffer, const Texture& texture, TextureHandle& textureHandle, bool generateMips);
     void BeginLabel(vk::Queue queue, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi);
     void EndLabel(vk::Queue queue, const vk::DispatchLoaderDynamic dldi);
     void BeginLabel(vk::CommandBuffer commandBuffer, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi);

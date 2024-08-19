@@ -26,6 +26,7 @@
 #include "model_loader.hpp"
 #include "gbuffers.hpp"
 #include "application.hpp"
+#include "single_time_commands.hpp"
 
 Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> application) :
     _brain(initInfo)
@@ -48,9 +49,9 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout, _cameraStructure);
 
 
-    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
-    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32), cb), _cameraStructure, _hdrTarget);
-    util::EndSingleTimeCommands(_brain, cb);
+    SingleTimeCommands commandBuffer{ _brain };
+    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32), commandBuffer), _cameraStructure, _hdrTarget);
+    commandBuffer.Submit();
 
     _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure);
     _tonemappingPipeline = std::make_unique<TonemappingPipeline>(_brain, _hdrTarget, *_swapChain);

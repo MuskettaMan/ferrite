@@ -4,6 +4,7 @@
 #include <fastgltf/glm_element_traits.hpp>
 #include "stb_image.h"
 #include "vulkan_helper.hpp"
+#include "single_time_commands.hpp"
 
 ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout materialDescriptorSetLayout) :
     _brain(brain),
@@ -21,9 +22,10 @@ ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout mater
     texture.data = std::vector<std::byte>(texture.width * texture.height * texture.numChannels * sizeof(float));
     std::array<std::shared_ptr<TextureHandle>, 5> textures;
     textures[0] = std::make_shared<TextureHandle>();
-    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
-    util::CreateTextureImage(_brain, cb, texture, *textures[0], false);
-    util::EndSingleTimeCommands(_brain, cb);
+
+    SingleTimeCommands commandBuffer{ _brain };
+    commandBuffer.CreateTextureImage(texture, *textures[0], false);
+    commandBuffer.Submit();
 
     std::fill(textures.begin() + 1, textures.end(), textures[0]);
 
@@ -34,11 +36,9 @@ ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout mater
 ModelLoader::~ModelLoader()
 {
     vmaDestroyBuffer(_brain.vmaAllocator, _defaultMaterial->materialUniformBuffer, _defaultMaterial->materialUniformAllocation);
-    for(auto& texture : _defaultMaterial->textures)
-    {
-        vmaDestroyImage(_brain.vmaAllocator, texture->image, texture->imageAllocation);
-        _brain.device.destroy(texture->imageView);
-    }
+
+    vmaDestroyImage(_brain.vmaAllocator, _defaultMaterial->textures[0]->image, _defaultMaterial->textures[0]->imageAllocation);
+    _brain.device.destroy(_defaultMaterial->textures[0]->imageView);
 }
 
 ModelHandle ModelLoader::Load(std::string_view path)
@@ -362,7 +362,7 @@ glm::vec4 ModelLoader::CalculateTangent(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2
 
 ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::vector<Texture>& textures, const std::vector<Material>& materials, const fastgltf::Asset& gltf)
 {
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain);
+    SingleTimeCommands commandBuffer{ _brain };
 
     ModelHandle modelHandle{};
 
@@ -374,7 +374,7 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         textureHandle.width = texture.width;
         textureHandle.height = texture.height;
 
-        util::CreateTextureImage(_brain, commandBuffer, texture, textureHandle, true);
+        commandBuffer.CreateTextureImage(texture, textureHandle, true);
 
         modelHandle.textures.emplace_back(std::make_shared<TextureHandle>(textureHandle));
     }
@@ -420,12 +420,12 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
     for(size_t i = 0; i < gltf.scenes[0].nodeIndices.size(); ++i)
         RecurseHierarchy(gltf.nodes[gltf.scenes[0].nodeIndices[i]], modelHandle, gltf, glm::mat4{1.0f});
 
-    util::EndSingleTimeCommands(_brain, commandBuffer);
+    commandBuffer.Submit();
 
     return modelHandle;
 }
 
-MeshPrimitiveHandle ModelLoader::LoadPrimitive(const MeshPrimitive& primitive, vk::CommandBuffer commandBuffer, std::shared_ptr<MaterialHandle> material)
+MeshPrimitiveHandle ModelLoader::LoadPrimitive(const MeshPrimitive& primitive, SingleTimeCommands& commandBuffer, std::shared_ptr<MaterialHandle> material)
 {
     MeshPrimitiveHandle primitiveHandle{};
     primitiveHandle.material = material == nullptr ? _defaultMaterial : material;
@@ -433,8 +433,8 @@ MeshPrimitiveHandle ModelLoader::LoadPrimitive(const MeshPrimitive& primitive, v
     primitiveHandle.indexType = primitive.indexType;
     primitiveHandle.indexCount = primitive.indicesBytes.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
 
-    util::CreateLocalBuffer(_brain, commandBuffer, primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
-    util::CreateLocalBuffer(_brain, commandBuffer, primitive.indicesBytes, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
+    commandBuffer.CreateLocalBuffer(primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
+    commandBuffer.CreateLocalBuffer(primitive.indicesBytes, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
 
     return primitiveHandle;
 }
