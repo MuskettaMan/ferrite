@@ -59,7 +59,8 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     CreateCommandBuffers();
     CreateSyncObjects();
 
-    _scene.model = _modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
+    _scene.model = _modelLoader->Load("assets/models/EnvironmentTest/EnvironmentTest.gltf");
+    //_scene.model = _modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
     //_scene.model = _modelLoader->Load("assets/models/DamagedHelmet.glb");
 
     vk::Format format = _swapChain->GetFormat();
@@ -128,7 +129,7 @@ void Engine::Run()
 
     _scene.camera.rotation = glm::normalize(_scene.camera.rotation);
 
-    const float speed = 0.0005f * deltaTimeMS;
+    const float speed = 0.005f * deltaTimeMS;
     glm::vec3 movement{ 0.0f };
     if(_application->KeyPressed('W'))
         movement += glm::vec3{0.0f, 0.0f, -1.0f};

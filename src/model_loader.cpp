@@ -258,7 +258,7 @@ Material ModelLoader::ProcessMaterial(const fastgltf::Material& gltfMaterial, co
     material.albedoFactor = *reinterpret_cast<const glm::vec4*>(&gltfMaterial.pbrData.baseColorFactor);
     material.metallicFactor = gltfMaterial.pbrData.metallicFactor;
     material.roughnessFactor = gltfMaterial.pbrData.roughnessFactor;
-    material.normalScale = gltfMaterial.normalTexture.value().scale;
+    material.normalScale = gltfMaterial.normalTexture.has_value() ? gltfMaterial.normalTexture.value().scale : 0.0f;
     material.emissiveFactor = *reinterpret_cast<const glm::vec3*>(&gltfMaterial.emissiveFactor);
 
     return material;
@@ -450,7 +450,8 @@ void ModelLoader::RecurseHierarchy(const fastgltf::Node& gltfNode, ModelHandle& 
     matrix = *reinterpret_cast<glm::mat4*>(&transform);
     node.transform = matrix;
 
-    modelHandle.hierarchy.allNodes.emplace_back(node);
+    if(gltfNode.meshIndex.has_value())
+        modelHandle.hierarchy.allNodes.emplace_back(node);
 
     for(size_t i = 0; i < gltfNode.children.size(); ++i)
     {
