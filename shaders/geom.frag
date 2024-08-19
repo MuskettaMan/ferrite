@@ -37,38 +37,38 @@ layout(set = 2, binding = 6) uniform MaterialInfoUBO
 
 void main()
 {
-    vec4 albedoSample = vec4(0.0);
-    vec4 mrSample = vec4(0.0);
-    vec4 occlusionSample = vec4(1.0);
-    vec4 emissiveSample = vec4(0.0);
+    vec4 albedoSample = pow(materialInfoUBO.albedoFactor, vec4(2.2));
+    vec4 mrSample = vec4(materialInfoUBO.metallicFactor);
+    vec4 occlusionSample = vec4(materialInfoUBO.occlusionStrength);
+    vec4 emissiveSample = pow(vec4(materialInfoUBO.emissiveFactor, 0.0), vec4(2.2));
 
     vec3 normal = normalIn;
 
     if(materialInfoUBO.useAlbedoMap)
     {
-        albedoSample = pow(texture(sampler2D(albedoImage, imageSampler), texCoord), vec4(2.2));
+        albedoSample *= pow(texture(sampler2D(albedoImage, imageSampler), texCoord), vec4(2.2));
     }
     if(materialInfoUBO.useMRMap)
     {
-        mrSample = texture(sampler2D(mrImage, imageSampler), texCoord);
+        mrSample *= texture(sampler2D(mrImage, imageSampler), texCoord);
     }
     if(materialInfoUBO.useNormalMap)
     {
-        vec4 normalSample = texture(sampler2D(normalImage, imageSampler), texCoord);
+        vec4 normalSample = texture(sampler2D(normalImage, imageSampler), texCoord) * materialInfoUBO.normalScale;
         normal = normalSample.xyz * 2.0 - 1.0;
         normal = normalize(TBN * normal);
     }
     if(materialInfoUBO.useOcclusionMap)
     {
-        occlusionSample = texture(sampler2D(occlusionImage, imageSampler), texCoord);
+        occlusionSample *= texture(sampler2D(occlusionImage, imageSampler), texCoord);
     }
     if(materialInfoUBO.useEmissiveMap)
     {
-        emissiveSample = pow(texture(sampler2D(emissiveImage, imageSampler), texCoord), vec4(2.2));
+        emissiveSample *= pow(texture(sampler2D(emissiveImage, imageSampler), texCoord), vec4(2.2));
     }
 
-    outAlbedoM = vec4(albedoSample.rgb, mrSample.r);
-    outEmissiveAO = vec4(emissiveSample.rgb, occlusionSample.b);
+    outAlbedoM = vec4(albedoSample.rgb, mrSample.b);
+    outEmissiveAO = vec4(emissiveSample.rgb, mrSample.r);
     outNormalR = vec4(normalize(normal), mrSample.g);
 
     outPosition = vec4(position, 1.0);

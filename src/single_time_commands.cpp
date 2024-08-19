@@ -56,13 +56,13 @@ void SingleTimeCommands::CreateTextureImage(const Texture& texture, TextureHandl
     vk::Buffer& stagingBuffer = _stagingBuffers.emplace_back();
     VmaAllocation& stagingBufferAllocation = _stagingAllocations.emplace_back();
 
-    util::CreateBuffer(_brain, imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Texture staging buffer");
+    util::CreateBuffer(_brain, imageSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, VMA_MEMORY_USAGE_CPU_ONLY, "Texture staging buffer");
 
     vmaCopyMemoryToAllocation(_brain.vmaAllocator, texture.data.data(), stagingBufferAllocation, 0, imageSize);
 
     util::CreateImage(_brain.vmaAllocator, texture.width, texture.height, texture.GetFormat(),
                       vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled,
-                      textureHandle.image, textureHandle.imageAllocation, "Texture image", generateMips);
+                      textureHandle.image, textureHandle.imageAllocation, "Texture image", generateMips, VMA_MEMORY_USAGE_GPU_ONLY);
 
 
     vk::ImageLayout oldLayout = vk::ImageLayout::eTransferDstOptimal;
@@ -115,11 +115,11 @@ void SingleTimeCommands::CreateLocalBuffer(const std::byte* vec, uint32_t count,
 
     vk::Buffer& stagingBuffer = _stagingBuffers.emplace_back();
     VmaAllocation& stagingBufferAllocation = _stagingAllocations.emplace_back();
-    util::CreateBuffer(_brain, bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, "Staging buffer");
+    util::CreateBuffer(_brain, bufferSize, vk::BufferUsageFlagBits::eTransferSrc, stagingBuffer, true, stagingBufferAllocation, VMA_MEMORY_USAGE_CPU_ONLY, "Staging buffer");
 
     vmaCopyMemoryToAllocation(_brain.vmaAllocator, vec, stagingBufferAllocation, 0, bufferSize);
 
-    util::CreateBuffer(_brain, bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation, name.data());
+    util::CreateBuffer(_brain, bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation, VMA_MEMORY_USAGE_GPU_ONLY, name.data());
 
     util::CopyBuffer(_commandBuffer, stagingBuffer, buffer, bufferSize);
 }

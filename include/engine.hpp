@@ -14,6 +14,7 @@ class GeometryPipeline;
 class LightingPipeline;
 class SkydomePipeline;
 class TonemappingPipeline;
+class IBLPipeline;
 class SwapChain;
 class GBuffers;
 class VulkanBrain;
@@ -38,9 +39,11 @@ private:
     std::unique_ptr<LightingPipeline> _lightingPipeline;
     std::unique_ptr<SkydomePipeline> _skydomePipeline;
     std::unique_ptr<TonemappingPipeline> _tonemappingPipeline;
+    std::unique_ptr<IBLPipeline> _iblPipeline;
     std::unique_ptr<ModelLoader> _modelLoader;
 
     SceneDescription _scene;
+    TextureHandle _environmentMap;
 
     std::unique_ptr<SwapChain> _swapChain;
     std::unique_ptr<GBuffers> _gBuffers;
@@ -68,4 +71,5 @@ private:
     void UpdateCameraDescriptorSet(uint32_t currentFrame);
     CameraUBO CalculateCamera(const Camera& camera);
     void InitializeHDRTarget();
+    void LoadEnvironmentMap();
 };

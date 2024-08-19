@@ -71,6 +71,17 @@ struct HDR
     }
 };
 
+struct Cubemap
+{
+    vk::Format format;
+    size_t size;
+    vk::Image image;
+    VmaAllocation allocation;
+    std::array<vk::ImageView, 6> faceViews;
+    vk::ImageView view;
+    vk::UniqueSampler sampler;
+};
+
 struct Material
 {
     std::optional<uint32_t> albedoIndex;

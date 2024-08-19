@@ -2,32 +2,15 @@
 #include "shaders/shader_loader.hpp"
 #include "hdr_target.hpp"
 #include "single_time_commands.hpp"
+#include "vulkan_helper.hpp"
 
-SkydomePipeline::SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&& sphere, const CameraStructure& camera, const HDRTarget& hdrTarget) :
+SkydomePipeline::SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&& sphere, const CameraStructure& camera, const HDRTarget& hdrTarget, const TextureHandle& environmentMap) :
     _brain(brain),
     _sphere(sphere),
     _camera(camera),
-    _hdrTarget(hdrTarget)
+    _hdrTarget(hdrTarget),
+    _environmentMap(environmentMap)
 {
-    int32_t width, height, numChannels;
-    float* data = stbi_loadf("assets/hdri/industrial_sunset_02_puresky_4k.hdr", &width, &height, &numChannels, 4);
-
-    Texture texture{};
-    texture.width = width;
-    texture.height = height;
-    texture.numChannels = 4;
-    texture.isHDR = true;
-    texture.data.resize(width * height * texture.numChannels * sizeof(float));
-    std::memcpy(texture.data.data(), data, texture.data.size());
-
-    stbi_image_free(data);
-
-    SingleTimeCommands commandBuffer{ _brain };
-    commandBuffer.CreateTextureImage(texture, _hdri, false);
-    commandBuffer.Submit();
-
-    util::NameObject(_hdri.image, "Skydome HDRI", _brain.device, _brain.dldi);
-
     _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear, 0);
 
     CreateDescriptorSetLayout();
@@ -39,9 +22,6 @@ SkydomePipeline::~SkydomePipeline()
 {
     vmaDestroyBuffer(_brain.vmaAllocator, _sphere.vertexBuffer, _sphere.vertexBufferAllocation);
     vmaDestroyBuffer(_brain.vmaAllocator, _sphere.indexBuffer, _sphere.indexBufferAllocation);
-
-    _brain.device.destroy(_hdri.imageView);
-    vmaDestroyImage(_brain.vmaAllocator, _hdri.image, _hdri.imageAllocation);
 
     _brain.device.destroy(_descriptorSetLayout);
     _brain.device.destroy(_pipelineLayout);
@@ -241,7 +221,7 @@ void SkydomePipeline::CreateDescriptorSet()
     vk::DescriptorImageInfo imageInfo{};
     imageInfo.sampler = *_sampler;
     imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    imageInfo.imageView = _hdri.imageView;
+    imageInfo.imageView = _environmentMap.imageView;
 
     vk::WriteDescriptorSet descriptorWrite{};
     descriptorWrite.dstSet = _descriptorSet;

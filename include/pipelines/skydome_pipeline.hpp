@@ -2,14 +2,14 @@
 
 #include "include.hpp"
 #include "swap_chain.hpp"
-#include "vulkan_helper.hpp"
+#include "mesh.hpp"
 
 struct HDRTarget;
 
 class SkydomePipeline
 {
 public:
-    SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&& sphere, const CameraStructure& camera, const HDRTarget& hdrTarget);
+    SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&& sphere, const CameraStructure& camera, const HDRTarget& hdrTarget, const TextureHandle& environmentMap);
     ~SkydomePipeline();
 
     void RecordCommands(vk::CommandBuffer commandBuffer, uint32_t currentFrame);
@@ -22,9 +22,9 @@ private:
     const VulkanBrain& _brain;
     const CameraStructure& _camera;
     const HDRTarget& _hdrTarget;
+    const TextureHandle& _environmentMap;
 
     MeshPrimitiveHandle _sphere;
-    TextureHandle _hdri;
     vk::UniqueSampler _sampler;
 
     vk::PipelineLayout _pipelineLayout;

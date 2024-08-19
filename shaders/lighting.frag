@@ -5,6 +5,7 @@ layout(set = 0, binding = 1) uniform texture2D gBufferAlbedoM;    // RGB: Albedo
 layout(set = 0, binding = 2) uniform texture2D gBufferNormalR;    // RGB: Normal,   A: Roughness
 layout(set = 0, binding = 3) uniform texture2D gBufferEmissiveAO; // RGB: Emissive, A: AO
 layout(set = 0, binding = 4) uniform texture2D gBufferPosition;   // RGB: Position, A: Unused
+layout(set = 0, binding = 5) uniform samplerCube irradianceMap;
 
 layout(set = 1, binding = 0) uniform CameraUBO
 {
@@ -25,6 +26,7 @@ float DistributionGGX(vec3 N, vec3 H, float roughness);
 float GeometrySchlickGGX(float NoV, float roughness);
 float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness);
 vec3 FresnelSchlick(float cosTheta, vec3 F0);
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness);
 
 void main()
 {
@@ -40,8 +42,8 @@ void main()
     vec3 emissive = emissiveAO.rgb;
     float ao = emissiveAO.a;
 
-    if(normal == vec3(0.0, 0.0, 0.0))
-        discard;
+    if (normal == vec3(0.0, 0.0, 0.0))
+    discard;
 
     vec3 lightDir = normalize(vec3(-0.5, 0.3, -0.3));
     vec3 Lo = vec3(0.0);
@@ -51,30 +53,37 @@ void main()
 
     vec3 L = lightDir;
     vec3 H = normalize(V + L);
-    vec3 radiance = vec3(244.0f, 183.0f, 64.0f) / 255.0f * 16.0; // Light color.
-
+    vec3 radiance = vec3(244.0f, 183.0f, 64.0f) / 255.0f * 4.0; // Light color.
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
-    vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
 
-    float NDF = DistributionGGX(N, H, roughness);
-    float G = GeometrySmith(N, V, L, roughness);
+    {
+        vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
 
-    vec3 numerator = NDF * G * F;
-    float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
-    vec3 specular = numerator / denominator;
+        float NDF = DistributionGGX(N, H, roughness);
+        float G = GeometrySmith(N, V, L, roughness);
 
-    vec3 kS = F;
-    vec3 kD = vec3(1.0) - kS;
+        vec3 numerator = NDF * G * F;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        vec3 specular = numerator / denominator;
 
-    kD *= 1.0 - metallic;
+        vec3 kS = F;
+        vec3 kD = vec3(1.0) - kS;
 
-    float NoL = max(dot(N, L), 0.0);
+        kD *= 1.0 - metallic;
 
-    Lo += (kD * albedo / PI + specular) * radiance * NoL;
+        float NoL = max(dot(N, L), 0.0);
 
-    vec3 ambient = vec3(0.03) * albedo * ao;
-    outColor = vec4(ambient + Lo + emissive, 1.0);
+        Lo += (kD * albedo / PI + specular) * radiance * NoL;
+    }
+
+    vec3 kS = FresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+    vec3 kD = 1.0 - kS;
+    vec3 irradiance = texture(irradianceMap, -N).rgb;
+    vec3 diffuse = irradiance * albedo;
+    vec3 ambient = (kD * diffuse) * ao;
+
+    outColor = vec4(Lo + ambient + emissive, 1.0);
 }
 
 
@@ -116,4 +125,9 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 vec3 FresnelSchlick(float cosTheta, vec3 F0)
 {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+{
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }

@@ -23,7 +23,7 @@
 #include "pipelines/lighting_pipeline.hpp"
 #include "pipelines/skydome_pipeline.hpp"
 #include "pipelines/tonemapping_pipeline.hpp"
-#include "model_loader.hpp"
+#include "pipelines/ibl_pipeline.hpp"
 #include "gbuffers.hpp"
 #include "application.hpp"
 #include "single_time_commands.hpp"
@@ -42,25 +42,30 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     CreateDescriptorSetLayout();
     InitializeCameraUBODescriptors();
     InitializeHDRTarget();
+    LoadEnvironmentMap();
 
     _modelLoader = std::make_unique<ModelLoader>(_brain, _materialDescriptorSetLayout);
 
+    SingleTimeCommands commandBufferPrimitive{ _brain };
+    MeshPrimitiveHandle uvSphere = _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32), commandBufferPrimitive);
+    commandBufferPrimitive.Submit();
+
     _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
     _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout, _cameraStructure);
-
-
-    SingleTimeCommands commandBuffer{ _brain };
-    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32), commandBuffer), _cameraStructure, _hdrTarget);
-    commandBuffer.Submit();
-
-    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure);
+    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, std::move(uvSphere), _cameraStructure, _hdrTarget, _environmentMap);
     _tonemappingPipeline = std::make_unique<TonemappingPipeline>(_brain, _hdrTarget, *_swapChain);
+    _iblPipeline = std::make_unique<IBLPipeline>(_brain, _environmentMap);
+    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure, _iblPipeline->IrradianceMap());
+
+    SingleTimeCommands commandBufferIBL{ _brain };
+    _iblPipeline->RecordCommands(commandBufferIBL.CommandBuffer());
+    commandBufferIBL.Submit();
 
     CreateCommandBuffers();
     CreateSyncObjects();
 
-    _scene.model = _modelLoader->Load("assets/models/EnvironmentTest/EnvironmentTest.gltf");
-    //_scene.model = _modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
+    //_scene.model = _modelLoader->Load("assets/models/EnvironmentTest/EnvironmentTest.gltf");
+    _scene.model = _modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
     //_scene.model = _modelLoader->Load("assets/models/DamagedHelmet.glb");
 
     vk::Format format = _swapChain->GetFormat();
@@ -129,7 +134,7 @@ void Engine::Run()
 
     _scene.camera.rotation = glm::normalize(_scene.camera.rotation);
 
-    const float speed = 0.005f * deltaTimeMS;
+    const float speed = 0.001f * deltaTimeMS;
     glm::vec3 movement{ 0.0f };
     if(_application->KeyPressed('W'))
         movement += glm::vec3{0.0f, 0.0f, -1.0f};
@@ -226,6 +231,9 @@ Engine::~Engine()
     ImGui_ImplVulkan_Shutdown();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
+
+    _brain.device.destroy(_environmentMap.imageView);
+    vmaDestroyImage(_brain.vmaAllocator, _environmentMap.image, _environmentMap.imageAllocation);
 
     for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
     {
@@ -356,6 +364,7 @@ void Engine::InitializeCameraUBODescriptors()
         util::CreateBuffer(_brain, bufferSize,
                            vk::BufferUsageFlagBits::eUniformBuffer,
                            _cameraStructure.buffers[i], true, _cameraStructure.allocations[i],
+                           VMA_MEMORY_USAGE_CPU_ONLY,
                            "Uniform buffer");
 
         util::VK_ASSERT(vmaMapMemory(_brain.vmaAllocator, _cameraStructure.allocations[i], &_cameraStructure.mappedPtrs[i]), "Failed mapping memory for UBO!");
@@ -422,7 +431,7 @@ void Engine::InitializeHDRTarget()
 
     util::CreateImage(_brain.vmaAllocator, _hdrTarget.size.x, _hdrTarget.size.y, _hdrTarget.format,
                       vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-                      _hdrTarget.images, _hdrTarget.allocations, "HDR Target", false);
+                      _hdrTarget.images, _hdrTarget.allocations, "HDR Target", false, VMA_MEMORY_USAGE_GPU_ONLY);
     util::NameObject(_hdrTarget.images, "[IMAGE] HDR Target", _brain.device, _brain.dldi);
 
     _hdrTarget.imageViews = util::CreateImageView(_brain.device, _hdrTarget.images, _hdrTarget.format, vk::ImageAspectFlagBits::eColor);
@@ -431,4 +440,26 @@ void Engine::InitializeHDRTarget()
     vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
     util::TransitionImageLayout(cb, _hdrTarget.images, _hdrTarget.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
     util::EndSingleTimeCommands(_brain,cb);
+}
+
+void Engine::LoadEnvironmentMap()
+{
+    int32_t width, height, numChannels;
+    float* data = stbi_loadf("assets/hdri/industrial_sunset_02_puresky_4k.hdr", &width, &height, &numChannels, 4);
+
+    Texture texture{};
+    texture.width = width;
+    texture.height = height;
+    texture.numChannels = 4;
+    texture.isHDR = true;
+    texture.data.resize(width * height * texture.numChannels * sizeof(float));
+    std::memcpy(texture.data.data(), data, texture.data.size());
+
+    stbi_image_free(data);
+
+    SingleTimeCommands commandBuffer{ _brain };
+    commandBuffer.CreateTextureImage(texture, _environmentMap, false);
+    commandBuffer.Submit();
+
+    util::NameObject(_environmentMap.image, "Environment HDRI", _brain.device, _brain.dldi);
 }

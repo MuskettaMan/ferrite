@@ -1,11 +1,12 @@
 #include "pipelines/lighting_pipeline.hpp"
 #include "shaders/shader_loader.hpp"
 
-LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget, const CameraStructure& camera) :
+LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget, const CameraStructure& camera, const Cubemap& irradianceMap) :
     _brain(brain),
     _gBuffers(gBuffers),
     _hdrTarget(hdrTarget),
-    _camera(camera)
+    _camera(camera),
+    _irradianceMap(irradianceMap)
 {
     _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear, 1);
     CreateDescriptorSetLayout();
@@ -172,7 +173,7 @@ void LightingPipeline::CreatePipeline()
 
 void LightingPipeline::CreateDescriptorSetLayout()
 {
-    std::array<vk::DescriptorSetLayoutBinding, DEFERRED_ATTACHMENT_COUNT + 1> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, DEFERRED_ATTACHMENT_COUNT + 2> bindings{};
 
     vk::DescriptorSetLayoutBinding& samplerLayoutBinding{bindings[0]};
     samplerLayoutBinding.binding = 0;
@@ -181,7 +182,7 @@ void LightingPipeline::CreateDescriptorSetLayout()
     samplerLayoutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
     samplerLayoutBinding.pImmutableSamplers = nullptr;
 
-    for(size_t i = 1; i < bindings.size(); ++i)
+    for(size_t i = 1; i < DEFERRED_ATTACHMENT_COUNT + 1; ++i)
     {
         vk::DescriptorSetLayoutBinding& binding{bindings[i]};
         binding.binding = i;
@@ -190,6 +191,13 @@ void LightingPipeline::CreateDescriptorSetLayout()
         binding.stageFlags = vk::ShaderStageFlagBits::eFragment;
         binding.pImmutableSamplers = nullptr;
     }
+
+    vk::DescriptorSetLayoutBinding& binding{bindings[5]};
+    binding.binding = 5;
+    binding.descriptorCount = 1;
+    binding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    binding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+    binding.pImmutableSamplers = nullptr;
 
     vk::DescriptorSetLayoutCreateInfo createInfo{};
     createInfo.bindingCount = bindings.size();
@@ -217,14 +225,14 @@ void LightingPipeline::UpdateGBufferViews()
     vk::DescriptorImageInfo samplerInfo{};
     samplerInfo.sampler = *_sampler;
 
-    std::array<vk::DescriptorImageInfo, DEFERRED_ATTACHMENT_COUNT> imageInfo{};
-    for(size_t i = 0; i < imageInfo.size(); ++i)
+    std::array<vk::DescriptorImageInfo, DEFERRED_ATTACHMENT_COUNT> imageInfos{};
+    for(size_t i = 0; i < imageInfos.size(); ++i)
     {
-        imageInfo[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        imageInfo[i].imageView = _gBuffers.GBufferView(i);
+        imageInfos[i].imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        imageInfos[i].imageView = _gBuffers.GBufferView(i);
     }
 
-    std::array<vk::WriteDescriptorSet, DEFERRED_ATTACHMENT_COUNT + 1> descriptorWrites{};
+    std::array<vk::WriteDescriptorSet, DEFERRED_ATTACHMENT_COUNT + 2> descriptorWrites{};
     descriptorWrites[0].dstSet = _descriptorSet;
     descriptorWrites[0].dstBinding = 0;
     descriptorWrites[0].dstArrayElement = 0;
@@ -232,15 +240,28 @@ void LightingPipeline::UpdateGBufferViews()
     descriptorWrites[0].descriptorCount = 1;
     descriptorWrites[0].pImageInfo = &samplerInfo;
 
-    for(size_t i = 1; i < descriptorWrites.size(); ++i)
+    for(size_t i = 1; i < DEFERRED_ATTACHMENT_COUNT + 1; ++i)
     {
         descriptorWrites[i].dstSet = _descriptorSet;
         descriptorWrites[i].dstBinding = i;
         descriptorWrites[i].dstArrayElement = 0;
         descriptorWrites[i].descriptorType = vk::DescriptorType::eSampledImage;
         descriptorWrites[i].descriptorCount = 1;
-        descriptorWrites[i].pImageInfo = &imageInfo[i - 1];
+        descriptorWrites[i].pImageInfo = &imageInfos[i - 1];
+
     }
+
+    vk::DescriptorImageInfo irradianceMapInfo;
+    irradianceMapInfo.imageView = _irradianceMap.view;
+    irradianceMapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    irradianceMapInfo.sampler = *_irradianceMap.sampler;
+
+    descriptorWrites[5].dstSet = _descriptorSet;
+    descriptorWrites[5].dstBinding = 5;
+    descriptorWrites[5].dstArrayElement = 0;
+    descriptorWrites[5].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    descriptorWrites[5].descriptorCount = 1;
+    descriptorWrites[5].pImageInfo = &irradianceMapInfo;
 
     _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }

@@ -73,7 +73,7 @@ uint32_t util::FindMemoryType(vk::PhysicalDevice physicalDevice, uint32_t typeFi
     throw std::runtime_error("Failed finding suitable memory type!");
 }
 
-void util::CreateImage(VmaAllocator allocator, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::Image& image, VmaAllocation& allocation, std::string_view name, bool generateMips, uint32_t numLayers)
+void util::CreateImage(VmaAllocator allocator, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::Image& image, VmaAllocation& allocation, std::string_view name, bool generateMips, VmaMemoryUsage memoryUsage, uint32_t numLayers)
 {
     uint32_t mipCount = 1;
     if(generateMips)
@@ -95,13 +95,13 @@ void util::CreateImage(VmaAllocator allocator, uint32_t width, uint32_t height, 
     createInfo.flags = vk::ImageCreateFlags{ 0 };
 
     VmaAllocationCreateInfo allocationInfo{};
-    allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocationInfo.usage = memoryUsage;
 
     util::VK_ASSERT(vmaCreateImage(allocator, reinterpret_cast<VkImageCreateInfo*>(&createInfo), &allocationInfo, reinterpret_cast<VkImage*>(&image), &allocation, nullptr), "Failed creating image!");
     vmaSetAllocationName(allocator, allocation, name.data());
 }
 
-void util::CreateBuffer(const VulkanBrain& brain, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation, std::string_view name)
+void util::CreateBuffer(const VulkanBrain& brain, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation, VmaMemoryUsage memoryUsage, std::string_view name)
 {
     vk::BufferCreateInfo bufferInfo{};
     bufferInfo.size = size;
@@ -111,7 +111,7 @@ void util::CreateBuffer(const VulkanBrain& brain, vk::DeviceSize size, vk::Buffe
     bufferInfo.pQueueFamilyIndices = &brain.queueFamilyIndices.graphicsFamily.value();
 
     VmaAllocationCreateInfo allocationInfo{};
-    allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocationInfo.usage = memoryUsage;
     if(mappable)
         allocationInfo.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
@@ -165,7 +165,7 @@ MaterialHandle util::CreateMaterial(const VulkanBrain& brain, const std::array<s
     MaterialHandle materialHandle;
     materialHandle.textures = textures;
 
-    util::CreateBuffer(brain, sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation, "Material uniform buffer");
+    util::CreateBuffer(brain, sizeof(MaterialHandle::MaterialInfo), vk::BufferUsageFlagBits::eUniformBuffer, materialHandle.materialUniformBuffer, true, materialHandle.materialUniformAllocation, VMA_MEMORY_USAGE_CPU_ONLY, "Material uniform buffer");
 
     void* uniformPtr;
     util::VK_ASSERT(vmaMapMemory(brain.vmaAllocator, materialHandle.materialUniformAllocation, &uniformPtr), "Failed mapping memory for material UBO!");
