@@ -1,12 +1,25 @@
 import os
 import subprocess
 import sys
+from distutils.version import LooseVersion
 
 # Set the base directory to search for shader files
 base_dir = os.path.dirname(os.path.realpath(__file__))
 
-# Set the path to the glslc compiler
-glslc_path = "C:/VulkanSDK/1.3.290.0/Bin/glslc.exe"
+# Find the latest version of VulkanSDK in the C:/VulkanSDK/ directory
+vulkan_sdk_base = "C:/VulkanSDK/"
+available_versions = [d for d in os.listdir(vulkan_sdk_base) if os.path.isdir(os.path.join(vulkan_sdk_base, d))]
+
+if not available_versions:
+    print("No VulkanSDK versions found.")
+    sys.exit(1)
+
+latest_version = max(available_versions, key=LooseVersion)
+glslc_path = os.path.join(vulkan_sdk_base, latest_version, "Bin", "glslc.exe")
+
+if not os.path.exists(glslc_path):
+    print(f"glslc compiler not found at {glslc_path}.")
+    sys.exit(1)
 
 # List of shader extensions and their corresponding output suffixes
 shader_types = {
@@ -17,7 +30,6 @@ shader_types = {
     ".tese": "-te.spv",
     ".comp": "-c.spv",
 }
-
 
 # Function to compile a shader file
 def compile_shader(shader_path, output_path):
