@@ -51,9 +51,9 @@ void GBuffers::CreateGBuffers()
         util::NameObject(_gBufferViews[i], _names[i], _brain.device, _brain.dldi);
     }
 
-    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
+    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
     util::TransitionImageLayout(cb, _gBuffersImageArray, format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, DEFERRED_ATTACHMENT_COUNT);
-    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
+    util::EndSingleTimeCommands(_brain, cb);
 }
 
 void GBuffers::CreateDepthResources()
@@ -65,9 +65,9 @@ void GBuffers::CreateDepthResources()
 
     _depthImageView = util::CreateImageView(_brain.device, _depthImage, _depthFormat, vk::ImageAspectFlagBits::eDepth);
 
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
+    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain);
     util::TransitionImageLayout(commandBuffer, _depthImage, _depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
-    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, commandBuffer, _brain.commandPool);
+    util::EndSingleTimeCommands(_brain, commandBuffer);
 }
 
 void GBuffers::CleanUp()

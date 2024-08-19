@@ -16,7 +16,7 @@ public:
     NON_MOVABLE(ModelLoader);
 
     ModelHandle Load(std::string_view path);
-    MeshPrimitiveHandle LoadPrimitive(const MeshPrimitive& primitive, std::shared_ptr<MaterialHandle> material = nullptr);
+    MeshPrimitiveHandle LoadPrimitive(const MeshPrimitive& primitive, vk::CommandBuffer commandBuffer, std::shared_ptr<MaterialHandle> material = nullptr);
 
 private:
     const VulkanBrain& _brain;

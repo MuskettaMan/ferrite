@@ -119,15 +119,15 @@ void util::CreateBuffer(const VulkanBrain& brain, vk::DeviceSize size, vk::Buffe
     vmaSetAllocationName(brain.vmaAllocator, allocation, name.data());
 }
 
-vk::CommandBuffer util::BeginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool)
+vk::CommandBuffer util::BeginSingleTimeCommands(const VulkanBrain& brain)
 {
     vk::CommandBufferAllocateInfo allocateInfo{};
     allocateInfo.level = vk::CommandBufferLevel::ePrimary;
-    allocateInfo.commandPool = commandPool;
+    allocateInfo.commandPool = brain.commandPool;
     allocateInfo.commandBufferCount = 1;
 
     vk::CommandBuffer commandBuffer;
-    util::VK_ASSERT(device.allocateCommandBuffers(&allocateInfo, &commandBuffer), "Failed allocating one time command buffer!");
+    util::VK_ASSERT(brain.device.allocateCommandBuffers(&allocateInfo, &commandBuffer), "Failed allocating one time command buffer!");
 
     vk::CommandBufferBeginInfo beginInfo{};
     beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
@@ -137,7 +137,7 @@ vk::CommandBuffer util::BeginSingleTimeCommands(vk::Device device, vk::CommandPo
     return commandBuffer;
 }
 
-void util::EndSingleTimeCommands(vk::Device device, vk::Queue queue, vk::CommandBuffer commandBuffer, vk::CommandPool commandPool)
+void util::EndSingleTimeCommands(const VulkanBrain& brain, vk::CommandBuffer commandBuffer)
 {
     commandBuffer.end();
 
@@ -145,23 +145,19 @@ void util::EndSingleTimeCommands(vk::Device device, vk::Queue queue, vk::Command
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    util::VK_ASSERT(queue.submit(1, &submitInfo, nullptr), "Failed submitting one time buffer to queue!");
-    queue.waitIdle();
+    util::VK_ASSERT(brain.graphicsQueue.submit(1, &submitInfo, nullptr), "Failed submitting one time buffer to queue!");
+    brain.graphicsQueue.waitIdle();
 
-    device.free(commandPool, commandBuffer);
+    brain.device.free(brain.commandPool, commandBuffer);
 }
 
-void util::CopyBuffer(const VulkanBrain& brain, vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size)
+void util::CopyBuffer(vk::CommandBuffer commandBuffer, vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size)
 {
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
-
     vk::BufferCopy copyRegion{};
     copyRegion.srcOffset = 0;
     copyRegion.dstOffset = 0;
     copyRegion.size = size;
     commandBuffer.copyBuffer(srcBuffer, dstBuffer, 1, &copyRegion);
-
-    util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 }
 
 MaterialHandle util::CreateMaterial(const VulkanBrain& brain, const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info, vk::Sampler sampler, vk::DescriptorSetLayout materialLayout, std::shared_ptr<MaterialHandle> defaultMaterial)
@@ -340,7 +336,7 @@ void util::TransitionImageLayout(vk::CommandBuffer commandBuffer, vk::Image imag
                                   1, &barrier);
 }
 
-void util::CopyBufferToImage(const VulkanBrain& brain, vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height)
+void util::CopyBufferToImage(vk::CommandBuffer commandBuffer, vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height)
 {
     vk::BufferImageCopy region{};
     region.bufferImageHeight = 0;
@@ -353,14 +349,10 @@ void util::CopyBufferToImage(const VulkanBrain& brain, vk::Buffer buffer, vk::Im
     region.imageOffset = vk::Offset3D{ 0, 0, 0 };
     region.imageExtent = vk::Extent3D{ width, height, 1 };
 
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
-
     commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, 1, &region);
-
-    util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 }
 
-void util::CreateTextureImage(const VulkanBrain& brain, const Texture& texture, TextureHandle& textureHandle, bool generateMips)
+void util::CreateTextureImage(const VulkanBrain& brain, vk::CommandBuffer commandBuffer, const Texture& texture, TextureHandle& textureHandle, bool generateMips)
 {
     vk::DeviceSize imageSize = texture.width * texture.height * texture.numChannels;
     if(texture.isHDR)
@@ -379,18 +371,15 @@ void util::CreateTextureImage(const VulkanBrain& brain, const Texture& texture, 
 
 
     vk::ImageLayout oldLayout = vk::ImageLayout::eTransferDstOptimal;
-    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
-    util::TransitionImageLayout(commandBuffer, textureHandle.image, texture.GetFormat(), vk::ImageLayout::eUndefined, oldLayout);
-    util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 
-    CopyBufferToImage(brain, stagingBuffer, textureHandle.image, texture.width, texture.height);
+    util::TransitionImageLayout(commandBuffer, textureHandle.image, texture.GetFormat(), vk::ImageLayout::eUndefined, oldLayout);
+
+    CopyBufferToImage(commandBuffer, stagingBuffer, textureHandle.image, texture.width, texture.height);
 
     uint32_t mipCount = 1;
     if(generateMips)
     {
-        commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
         util::TransitionImageLayout(commandBuffer, textureHandle.image, texture.GetFormat(), vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal, 1, 0, 1);
-        util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 
         mipCount = static_cast<uint32_t>(floor(log2(std::max(texture.width, texture.height))) + 1);
         for(uint32_t i = 1; i < mipCount; ++i)
@@ -410,27 +399,18 @@ void util::CreateTextureImage(const VulkanBrain& brain, const Texture& texture, 
             blit.dstOffsets[1].y = texture.height >> i;
             blit.dstOffsets[1].z = 1;
 
-            commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
             util::TransitionImageLayout(commandBuffer, textureHandle.image, texture.GetFormat(), vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, 1, i);
-            util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 
-            commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
             commandBuffer.blitImage(textureHandle.image, vk::ImageLayout::eTransferSrcOptimal, textureHandle.image, vk::ImageLayout::eTransferDstOptimal, 1, &blit, vk::Filter::eLinear);
-            util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 
-            commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
             util::TransitionImageLayout(commandBuffer, textureHandle.image, texture.GetFormat(), vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal, 1, i);
-            util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
         }
         oldLayout = vk::ImageLayout::eTransferSrcOptimal;
     }
 
-
-
-    commandBuffer = util::BeginSingleTimeCommands(brain.device, brain.commandPool);
     util::TransitionImageLayout(commandBuffer, textureHandle.image, texture.GetFormat(), oldLayout, vk::ImageLayout::eShaderReadOnlyOptimal, 1, 0, mipCount);
-    util::EndSingleTimeCommands(brain.device, brain.graphicsQueue, commandBuffer, brain.commandPool);
 
+    // TODO: staging buffer destroyed before command buffer has ended.
     brain.device.destroy(stagingBuffer, nullptr);
     vmaFreeMemory(brain.vmaAllocator, stagingBufferAllocation);
 
