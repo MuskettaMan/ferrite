@@ -23,11 +23,11 @@ namespace util
     uint32_t FindMemoryType(vk::PhysicalDevice physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties);
     void CreateImage(VmaAllocator allocator, uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::Image& image, VmaAllocation& allocation, std::string_view name, bool generateMips, uint32_t numLayers = 1);
     void CreateBuffer(const VulkanBrain& brain, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Buffer& buffer, bool mappable, VmaAllocation& allocation, std::string_view name);
-    vk::CommandBuffer BeginSingleTimeCommands(vk::Device device, vk::CommandPool commandPool);
-    void EndSingleTimeCommands(vk::Device device, vk::Queue queue, vk::CommandBuffer commandBuffer, vk::CommandPool commandPool);
-    void CopyBuffer(const VulkanBrain& brain, vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
+    vk::CommandBuffer BeginSingleTimeCommands(const VulkanBrain& brain);
+    void EndSingleTimeCommands(const VulkanBrain& brain, vk::CommandBuffer commandBuffer);
+    void CopyBuffer(vk::CommandBuffer commandBuffer, vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
     template <typename T>
-    static void CreateLocalBuffer(const VulkanBrain& brain, const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage, std::string_view name)
+    static void CreateLocalBuffer(const VulkanBrain& brain, vk::CommandBuffer commandBuffer, const std::vector<T>& vec, vk::Buffer& buffer, VmaAllocation& allocation, vk::BufferUsageFlags usage, std::string_view name)
     {
         vk::DeviceSize bufferSize = vec.size() * sizeof(T);
 
@@ -39,15 +39,15 @@ namespace util
 
         CreateBuffer(brain, bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage, buffer, false, allocation, name.data());
 
-        CopyBuffer(brain, stagingBuffer, buffer, bufferSize);
+        CopyBuffer(commandBuffer, stagingBuffer, buffer, bufferSize);
         brain.device.destroy(stagingBuffer, nullptr);
         vmaFreeMemory(brain.vmaAllocator, stagingBufferAllocation);
     }
     MaterialHandle CreateMaterial(const VulkanBrain& brain, const std::array<std::shared_ptr<TextureHandle>, 5>& textures, const MaterialHandle::MaterialInfo& info, vk::Sampler sampler, vk::DescriptorSetLayout materialLayout, std::shared_ptr<MaterialHandle> defaultMaterial = nullptr);
     vk::UniqueSampler CreateSampler(const VulkanBrain& brain, vk::Filter min, vk::Filter mag, vk::SamplerAddressMode addressingMode, vk::SamplerMipmapMode mipmapMode, uint32_t mipLevels);
     void TransitionImageLayout(vk::CommandBuffer commandBuffer, vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t numLayers = 1, uint32_t mipLevel = 0, uint32_t mipCount = 1);
-    void CopyBufferToImage(const VulkanBrain& brain, vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
-    void CreateTextureImage(const VulkanBrain& brain, const Texture& texture, TextureHandle& textureHandle, bool generateMips);
+    void CopyBufferToImage(vk::CommandBuffer commandBuffer, vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
+    void CreateTextureImage(const VulkanBrain& brain, vk::CommandBuffer commandBuffer, const Texture& texture, TextureHandle& textureHandle, bool generateMips);
     void BeginLabel(vk::Queue queue, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi);
     void EndLabel(vk::Queue queue, const vk::DispatchLoaderDynamic dldi);
     void BeginLabel(vk::CommandBuffer commandBuffer, std::string_view label, glm::vec3 color, const vk::DispatchLoaderDynamic dldi);

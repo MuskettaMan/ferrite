@@ -21,7 +21,10 @@ SkydomePipeline::SkydomePipeline(const VulkanBrain& brain, MeshPrimitiveHandle&&
 
     stbi_image_free(data);
 
-    util::CreateTextureImage(_brain, texture, _hdri, false);
+    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
+    util::CreateTextureImage(_brain, cb, texture, _hdri, false);
+    util::EndSingleTimeCommands(_brain, cb);
+
     util::NameObject(_hdri.image, "Skydome HDRI", _brain.device, _brain.dldi);
 
     _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear, 0);

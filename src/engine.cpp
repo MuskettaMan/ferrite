@@ -46,7 +46,12 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
     _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
     _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout, _cameraStructure);
-    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32)), _cameraStructure, _hdrTarget);
+
+
+    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
+    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, _modelLoader->LoadPrimitive(GenerateUVSphere(32, 32), cb), _cameraStructure, _hdrTarget);
+    util::EndSingleTimeCommands(_brain, cb);
+
     _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure);
     _tonemappingPipeline = std::make_unique<TonemappingPipeline>(_brain, _hdrTarget, *_swapChain);
 
@@ -421,7 +426,7 @@ void Engine::InitializeHDRTarget()
     _hdrTarget.imageViews = util::CreateImageView(_brain.device, _hdrTarget.images, _hdrTarget.format, vk::ImageAspectFlagBits::eColor);
     util::NameObject(_hdrTarget.imageViews, "HDR Target View", _brain.device, _brain.dldi);
 
-    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain.device, _brain.commandPool);
+    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
     util::TransitionImageLayout(cb, _hdrTarget.images, _hdrTarget.format, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
-    util::EndSingleTimeCommands(_brain.device, _brain.graphicsQueue, cb, _brain.commandPool);
+    util::EndSingleTimeCommands(_brain,cb);
 }

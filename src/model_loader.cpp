@@ -11,7 +11,8 @@ ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout mater
     _materialDescriptorSetLayout(materialDescriptorSetLayout)
 {
 
-    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear, static_cast<uint32_t>(floor(log2(2048))));
+    _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat,
+                                   vk::SamplerMipmapMode::eLinear, static_cast<uint32_t>(floor(log2(2048))));
 
     Texture texture;
     texture.width = 2;
@@ -19,10 +20,12 @@ ModelLoader::ModelLoader(const VulkanBrain& brain, vk::DescriptorSetLayout mater
     texture.numChannels = 4;
     texture.data = std::vector<std::byte>(texture.width * texture.height * texture.numChannels * sizeof(float));
     std::array<std::shared_ptr<TextureHandle>, 5> textures;
-    std::for_each(textures.begin(), textures.end(), [&texture, this](auto& ptr){
-        ptr = std::make_shared<TextureHandle>();
-        util::CreateTextureImage(_brain, texture, *ptr, false);
-    });
+    textures[0] = std::make_shared<TextureHandle>();
+    vk::CommandBuffer cb = util::BeginSingleTimeCommands(_brain);
+    util::CreateTextureImage(_brain, cb, texture, *textures[0], false);
+    util::EndSingleTimeCommands(_brain, cb);
+
+    std::fill(textures.begin() + 1, textures.end(), textures[0]);
 
     MaterialHandle::MaterialInfo info;
     _defaultMaterial = std::make_shared<MaterialHandle>(util::CreateMaterial(_brain, textures, info, *_sampler, _materialDescriptorSetLayout));
@@ -359,6 +362,8 @@ glm::vec4 ModelLoader::CalculateTangent(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2
 
 ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::vector<Texture>& textures, const std::vector<Material>& materials, const fastgltf::Asset& gltf)
 {
+    vk::CommandBuffer commandBuffer = util::BeginSingleTimeCommands(_brain);
+
     ModelHandle modelHandle{};
 
     // Load textures
@@ -369,7 +374,7 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         textureHandle.width = texture.width;
         textureHandle.height = texture.height;
 
-        util::CreateTextureImage(_brain, texture, textureHandle, true);
+        util::CreateTextureImage(_brain, commandBuffer, texture, textureHandle, true);
 
         modelHandle.textures.emplace_back(std::make_shared<TextureHandle>(textureHandle));
     }
@@ -407,7 +412,7 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
         MeshHandle meshHandle{};
 
         for(const auto& primitive : mesh.primitives)
-            meshHandle.primitives.emplace_back(LoadPrimitive(primitive, primitive.materialIndex.has_value() ? modelHandle.materials[primitive.materialIndex.value()] : nullptr));
+            meshHandle.primitives.emplace_back(LoadPrimitive(primitive, commandBuffer, primitive.materialIndex.has_value() ? modelHandle.materials[primitive.materialIndex.value()] : nullptr));
 
         modelHandle.meshes.emplace_back(std::make_shared<MeshHandle>(meshHandle));
     }
@@ -415,10 +420,12 @@ ModelHandle ModelLoader::LoadModel(const std::vector<Mesh>& meshes, const std::v
     for(size_t i = 0; i < gltf.scenes[0].nodeIndices.size(); ++i)
         RecurseHierarchy(gltf.nodes[gltf.scenes[0].nodeIndices[i]], modelHandle, gltf, glm::mat4{1.0f});
 
+    util::EndSingleTimeCommands(_brain, commandBuffer);
+
     return modelHandle;
 }
 
-MeshPrimitiveHandle ModelLoader::LoadPrimitive(const MeshPrimitive& primitive, std::shared_ptr<MaterialHandle> material)
+MeshPrimitiveHandle ModelLoader::LoadPrimitive(const MeshPrimitive& primitive, vk::CommandBuffer commandBuffer, std::shared_ptr<MaterialHandle> material)
 {
     MeshPrimitiveHandle primitiveHandle{};
     primitiveHandle.material = material == nullptr ? _defaultMaterial : material;
@@ -426,8 +433,8 @@ MeshPrimitiveHandle ModelLoader::LoadPrimitive(const MeshPrimitive& primitive, s
     primitiveHandle.indexType = primitive.indexType;
     primitiveHandle.indexCount = primitive.indicesBytes.size() / (primitiveHandle.indexType == vk::IndexType::eUint16 ? 2 : 4);
 
-    util::CreateLocalBuffer(_brain, primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
-    util::CreateLocalBuffer(_brain, primitive.indicesBytes, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
+    util::CreateLocalBuffer(_brain, commandBuffer, primitive.vertices, primitiveHandle.vertexBuffer, primitiveHandle.vertexBufferAllocation, vk::BufferUsageFlagBits::eVertexBuffer, "Vertex buffer");
+    util::CreateLocalBuffer(_brain, commandBuffer, primitive.indicesBytes, primitiveHandle.indexBuffer, primitiveHandle.indexBufferAllocation, vk::BufferUsageFlagBits::eIndexBuffer, "Index buffer");
 
     return primitiveHandle;
 }
