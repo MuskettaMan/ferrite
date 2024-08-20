@@ -210,9 +210,16 @@ struct ModelHandle
     Hierarchy hierarchy;
 };
 
+struct GameObject
+{
+    glm::mat4 transform;
+    std::shared_ptr<ModelHandle> model;
+};
+
 struct SceneDescription
 {
     Camera camera;
-    ModelHandle model;
+    std::vector<std::shared_ptr<ModelHandle>> models;
     std::vector<MeshPrimitiveHandle> otherMeshes;
+    std::vector<GameObject> gameObjects;
 };

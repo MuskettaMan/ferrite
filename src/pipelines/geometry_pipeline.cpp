@@ -73,10 +73,12 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
     commandBuffer.setScissor(0, 1, &_gBuffers.Scissor());
 
     std::vector<glm::mat4> transforms;
-    transforms.reserve(scene.model.hierarchy.allNodes.size());
-    for(auto& node : scene.model.hierarchy.allNodes)
+    for(auto& gameObject : scene.gameObjects)
     {
-        transforms.emplace_back(node.transform);
+        for(auto& node : gameObject.model->hierarchy.allNodes)
+        {
+            transforms.emplace_back(gameObject.transform * node.transform);
+        }
     }
     UpdateUniformData(currentFrame, transforms, scene.camera);
 
@@ -98,30 +100,34 @@ void GeometryPipeline::RecordCommands(vk::CommandBuffer commandBuffer, uint32_t 
         commandBuffer.drawIndexed(primitive.indexCount, 1, 0, 0, 0);
     }
 
-    for(size_t i = 0; i < scene.model.hierarchy.allNodes.size(); ++i)
+    uint32_t counter = 0;
+    for(auto& gameObject : scene.gameObjects)
     {
-        const auto& node = scene.model.hierarchy.allNodes[i];
-
-        for(const auto& primitive : node.mesh->primitives)
+        for(size_t i = 0; i < gameObject.model->hierarchy.allNodes.size(); ++i, ++counter)
         {
-            if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
-                throw std::runtime_error("No support for topology other than triangle list!");
+            const auto& node = gameObject.model->hierarchy.allNodes[i];
 
-            assert(primitive.material && "There should always be a material available.");
-            const MaterialHandle& material = *primitive.material;
+            for(const auto& primitive : node.mesh->primitives)
+            {
+                if(primitive.topology != vk::PrimitiveTopology::eTriangleList)
+                    throw std::runtime_error("No support for topology other than triangle list!");
 
-            uint32_t dynamicOffset = static_cast<uint32_t>(i * sizeof(UBO));
+                assert(primitive.material && "There should always be a material available.");
+                const MaterialHandle& material = *primitive.material;
 
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 1, &dynamicOffset);
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &_camera.descriptorSets[currentFrame], 0, nullptr);
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 2, 1, &material.descriptorSet, 0, nullptr);
+                uint32_t dynamicOffset = static_cast<uint32_t>(counter * sizeof(UBO));
 
-            vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
-            vk::DeviceSize offsets[] = { 0 };
-            commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
-            commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
+                commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 0, 1, &_frameData[currentFrame].descriptorSet, 1, &dynamicOffset);
+                commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 1, 1, &_camera.descriptorSets[currentFrame], 0, nullptr);
+                commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pipelineLayout, 2, 1, &material.descriptorSet, 0, nullptr);
 
-            commandBuffer.drawIndexed(primitive.indexCount, 1, 0, 0, 0);
+                vk::Buffer vertexBuffers[] = { primitive.vertexBuffer };
+                vk::DeviceSize offsets[] = { 0 };
+                commandBuffer.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+                commandBuffer.bindIndexBuffer(primitive.indexBuffer, 0, primitive.indexType);
+
+                commandBuffer.drawIndexed(primitive.indexCount, 1, 0, 0, 0);
+            }
         }
     }
 

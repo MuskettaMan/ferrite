@@ -65,8 +65,16 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     CreateSyncObjects();
 
     //_scene.model = _modelLoader->Load("assets/models/EnvironmentTest/EnvironmentTest.gltf");
-    _scene.model = _modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf");
-    //_scene.model = _modelLoader->Load("assets/models/DamagedHelmet.glb");
+    _scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/DamagedHelmet.glb")));
+    _scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf")));
+
+    glm::vec3 scale{0.05f};
+    glm::mat4 rotation{glm::quat(glm::vec3(0.0f, 90.0f, 0.0f))};
+    glm::vec3 translate{-0.275f, 0.06f, -0.025f};
+    glm::mat4 transform = glm::translate(glm::mat4{1.0f}, translate) * rotation * glm::scale(glm::mat4{1.0f}, scale);
+
+    _scene.gameObjects.emplace_back(transform, _scene.models[0]);
+    _scene.gameObjects.emplace_back(glm::mat4{1.0f}, _scene.models[1]);
 
     vk::Format format = _swapChain->GetFormat();
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
@@ -242,22 +250,25 @@ Engine::~Engine()
         _brain.device.destroy(_imageAvailableSemaphores[i]);
     }
 
-    for(auto& mesh : _scene.model.meshes)
+    for(auto& model : _scene.models)
     {
-        for(auto& primitive : mesh->primitives)
+        for(auto& mesh : model->meshes)
         {
-            vmaDestroyBuffer(_brain.vmaAllocator, primitive.vertexBuffer, primitive.vertexBufferAllocation);
-            vmaDestroyBuffer(_brain.vmaAllocator, primitive.indexBuffer, primitive.indexBufferAllocation);
+            for(auto& primitive : mesh->primitives)
+            {
+                vmaDestroyBuffer(_brain.vmaAllocator, primitive.vertexBuffer, primitive.vertexBufferAllocation);
+                vmaDestroyBuffer(_brain.vmaAllocator, primitive.indexBuffer, primitive.indexBufferAllocation);
+            }
         }
-    }
-    for(auto& texture : _scene.model.textures)
-    {
-        _brain.device.destroy(texture->imageView);
-        vmaDestroyImage(_brain.vmaAllocator, texture->image, texture->imageAllocation);
-    }
-    for(auto& material : _scene.model.materials)
-    {
-        vmaDestroyBuffer(_brain.vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
+        for(auto& texture : model->textures)
+        {
+            _brain.device.destroy(texture->imageView);
+            vmaDestroyImage(_brain.vmaAllocator, texture->image, texture->imageAllocation);
+        }
+        for(auto& material : model->materials)
+        {
+            vmaDestroyBuffer(_brain.vmaAllocator, material->materialUniformBuffer, material->materialUniformAllocation);
+        }
     }
 
     _brain.device.destroy(_hdrTarget.imageViews);
