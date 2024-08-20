@@ -260,6 +260,7 @@ Material ModelLoader::ProcessMaterial(const fastgltf::Material& gltfMaterial, co
     material.roughnessFactor = gltfMaterial.pbrData.roughnessFactor;
     material.normalScale = gltfMaterial.normalTexture.has_value() ? gltfMaterial.normalTexture.value().scale : 0.0f;
     material.emissiveFactor = *reinterpret_cast<const glm::vec3*>(&gltfMaterial.emissiveFactor);
+    material.occlusionStrength = gltfMaterial.occlusionTexture.has_value() ? gltfMaterial.occlusionTexture.value().strength : 1.0f;
 
     return material;
 }
