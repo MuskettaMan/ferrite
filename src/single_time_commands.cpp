@@ -49,6 +49,9 @@ void SingleTimeCommands::Submit()
 
 void SingleTimeCommands::CreateTextureImage(const Texture& texture, TextureHandle& textureHandle, bool generateMips)
 {
+    textureHandle.width = texture.width;
+    textureHandle.height = texture.height;
+
     vk::DeviceSize imageSize = texture.width * texture.height * texture.numChannels;
     if(texture.isHDR)
         imageSize *= sizeof(float);

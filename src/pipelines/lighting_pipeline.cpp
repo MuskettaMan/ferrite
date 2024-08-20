@@ -1,12 +1,14 @@
 #include "pipelines/lighting_pipeline.hpp"
 #include "shaders/shader_loader.hpp"
 
-LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget, const CameraStructure& camera, const Cubemap& irradianceMap) :
+LightingPipeline::LightingPipeline(const VulkanBrain& brain, const GBuffers& gBuffers, const HDRTarget& hdrTarget, const CameraStructure& camera, const Cubemap& irradianceMap, const Cubemap& prefilterMap, const TextureHandle& brdfLUT) :
     _brain(brain),
     _gBuffers(gBuffers),
     _hdrTarget(hdrTarget),
     _camera(camera),
-    _irradianceMap(irradianceMap)
+    _irradianceMap(irradianceMap),
+    _prefilterMap(prefilterMap),
+    _brdfLUT(brdfLUT)
 {
     _sampler = util::CreateSampler(_brain, vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, vk::SamplerMipmapMode::eLinear, 1);
     CreateDescriptorSetLayout();
@@ -173,7 +175,7 @@ void LightingPipeline::CreatePipeline()
 
 void LightingPipeline::CreateDescriptorSetLayout()
 {
-    std::array<vk::DescriptorSetLayoutBinding, DEFERRED_ATTACHMENT_COUNT + 2> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, DEFERRED_ATTACHMENT_COUNT + 4> bindings{};
 
     vk::DescriptorSetLayoutBinding& samplerLayoutBinding{bindings[0]};
     samplerLayoutBinding.binding = 0;
@@ -192,12 +194,24 @@ void LightingPipeline::CreateDescriptorSetLayout()
         binding.pImmutableSamplers = nullptr;
     }
 
-    vk::DescriptorSetLayoutBinding& binding{bindings[5]};
-    binding.binding = 5;
-    binding.descriptorCount = 1;
-    binding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    binding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-    binding.pImmutableSamplers = nullptr;
+    vk::DescriptorSetLayoutBinding& irradianceBinding{bindings[5]};
+    irradianceBinding.binding = 5;
+    irradianceBinding.descriptorCount = 1;
+    irradianceBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    irradianceBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+    irradianceBinding.pImmutableSamplers = nullptr;
+    vk::DescriptorSetLayoutBinding& prefilterBinding{bindings[6]};
+    prefilterBinding.binding = 6;
+    prefilterBinding.descriptorCount = 1;
+    prefilterBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    prefilterBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+    prefilterBinding.pImmutableSamplers = nullptr;
+    vk::DescriptorSetLayoutBinding& brdfLUTBinding{bindings[7]};
+    brdfLUTBinding.binding = 7;
+    brdfLUTBinding.descriptorCount = 1;
+    brdfLUTBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    brdfLUTBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+    brdfLUTBinding.pImmutableSamplers = nullptr;
 
     vk::DescriptorSetLayoutCreateInfo createInfo{};
     createInfo.bindingCount = bindings.size();
@@ -232,7 +246,7 @@ void LightingPipeline::UpdateGBufferViews()
         imageInfos[i].imageView = _gBuffers.GBufferView(i);
     }
 
-    std::array<vk::WriteDescriptorSet, DEFERRED_ATTACHMENT_COUNT + 2> descriptorWrites{};
+    std::array<vk::WriteDescriptorSet, DEFERRED_ATTACHMENT_COUNT + 4> descriptorWrites{};
     descriptorWrites[0].dstSet = _descriptorSet;
     descriptorWrites[0].dstBinding = 0;
     descriptorWrites[0].dstArrayElement = 0;
@@ -255,6 +269,14 @@ void LightingPipeline::UpdateGBufferViews()
     irradianceMapInfo.imageView = _irradianceMap.view;
     irradianceMapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
     irradianceMapInfo.sampler = *_irradianceMap.sampler;
+    vk::DescriptorImageInfo prefilterMapInfo;
+    prefilterMapInfo.imageView = _prefilterMap.view;
+    prefilterMapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    prefilterMapInfo.sampler = *_prefilterMap.sampler;
+    vk::DescriptorImageInfo brdfLUTMapInfo;
+    brdfLUTMapInfo.imageView = _brdfLUT.imageView;
+    brdfLUTMapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    brdfLUTMapInfo.sampler = *_prefilterMap.sampler;
 
     descriptorWrites[5].dstSet = _descriptorSet;
     descriptorWrites[5].dstBinding = 5;
@@ -262,6 +284,18 @@ void LightingPipeline::UpdateGBufferViews()
     descriptorWrites[5].descriptorType = vk::DescriptorType::eCombinedImageSampler;
     descriptorWrites[5].descriptorCount = 1;
     descriptorWrites[5].pImageInfo = &irradianceMapInfo;
+    descriptorWrites[6].dstSet = _descriptorSet;
+    descriptorWrites[6].dstBinding = 6;
+    descriptorWrites[6].dstArrayElement = 0;
+    descriptorWrites[6].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    descriptorWrites[6].descriptorCount = 1;
+    descriptorWrites[6].pImageInfo = &prefilterMapInfo;
+    descriptorWrites[7].dstSet = _descriptorSet;
+    descriptorWrites[7].dstBinding = 7;
+    descriptorWrites[7].dstArrayElement = 0;
+    descriptorWrites[7].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    descriptorWrites[7].descriptorCount = 1;
+    descriptorWrites[7].pImageInfo = &brdfLUTMapInfo;
 
     _brain.device.updateDescriptorSets(descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 }

@@ -50,13 +50,13 @@ struct Texture
     uint32_t width, height, numChannels;
     std::vector<std::byte> data;
     bool isHDR = false;
-
+    vk::Format format = vk::Format::eR8G8B8A8Unorm;
     vk::Format GetFormat() const
     {
         if(isHDR)
             return vk::Format::eR32G32B32A32Sfloat;
 
-        return vk::Format::eR8G8B8A8Unorm;
+        return format;
     }
 };
 
@@ -75,9 +75,9 @@ struct Cubemap
 {
     vk::Format format;
     size_t size;
+    size_t mipLevels;
     vk::Image image;
     VmaAllocation allocation;
-    std::array<vk::ImageView, 6> faceViews;
     vk::ImageView view;
     vk::UniqueSampler sampler;
 };

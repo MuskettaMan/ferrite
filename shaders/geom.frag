@@ -38,11 +38,12 @@ layout(set = 2, binding = 6) uniform MaterialInfoUBO
 void main()
 {
     vec4 albedoSample = pow(materialInfoUBO.albedoFactor, vec4(2.2));
-    vec4 mrSample = vec4(materialInfoUBO.metallicFactor);
-    vec4 occlusionSample = vec4(materialInfoUBO.occlusionStrength);
+    vec4 mrSample = vec4(materialInfoUBO.metallicFactor, materialInfoUBO.metallicFactor, 1.0, 1.0);
+    vec4 occlusionSample = vec4(1.0);
     vec4 emissiveSample = pow(vec4(materialInfoUBO.emissiveFactor, 0.0), vec4(2.2));
 
     vec3 normal = normalIn;
+    float ao = 1.0;
 
     if(materialInfoUBO.useAlbedoMap)
     {
@@ -61,6 +62,7 @@ void main()
     if(materialInfoUBO.useOcclusionMap)
     {
         occlusionSample *= texture(sampler2D(occlusionImage, imageSampler), texCoord);
+        ao = occlusionSample.r;
     }
     if(materialInfoUBO.useEmissiveMap)
     {
@@ -68,8 +70,8 @@ void main()
     }
 
     outAlbedoM = vec4(albedoSample.rgb, mrSample.b);
-    outEmissiveAO = vec4(emissiveSample.rgb, mrSample.r);
     outNormalR = vec4(normalize(normal), mrSample.g);
+    outEmissiveAO = vec4(emissiveSample.rgb, ao);
 
     outPosition = vec4(position, 1.0);
 }

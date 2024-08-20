@@ -55,7 +55,7 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, std::move(uvSphere), _cameraStructure, _hdrTarget, _environmentMap);
     _tonemappingPipeline = std::make_unique<TonemappingPipeline>(_brain, _hdrTarget, *_swapChain);
     _iblPipeline = std::make_unique<IBLPipeline>(_brain, _environmentMap);
-    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure, _iblPipeline->IrradianceMap());
+    _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure, _iblPipeline->IrradianceMap(), _iblPipeline->PrefilterMap(), _iblPipeline->BRDFLUTMap());
 
     SingleTimeCommands commandBufferIBL{ _brain };
     _iblPipeline->RecordCommands(commandBufferIBL.CommandBuffer());
@@ -134,7 +134,7 @@ void Engine::Run()
 
     _scene.camera.rotation = glm::normalize(_scene.camera.rotation);
 
-    const float speed = 0.001f * deltaTimeMS;
+    const float speed = 0.0005f * deltaTimeMS;
     glm::vec3 movement{ 0.0f };
     if(_application->KeyPressed('W'))
         movement += glm::vec3{0.0f, 0.0f, -1.0f};

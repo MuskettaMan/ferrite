@@ -6,6 +6,8 @@ layout(set = 0, binding = 2) uniform texture2D gBufferNormalR;    // RGB: Normal
 layout(set = 0, binding = 3) uniform texture2D gBufferEmissiveAO; // RGB: Emissive, A: AO
 layout(set = 0, binding = 4) uniform texture2D gBufferPosition;   // RGB: Position, A: Unused
 layout(set = 0, binding = 5) uniform samplerCube irradianceMap;
+layout(set = 0, binding = 6) uniform samplerCube prefilterMap;
+layout(set = 0, binding = 7) uniform sampler2D brdfLUT;
 
 layout(set = 1, binding = 0) uniform CameraUBO
 {
@@ -77,11 +79,22 @@ void main()
         Lo += (kD * albedo / PI + specular) * radiance * NoL;
     }
 
-    vec3 kS = FresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+    vec3 R = reflect(V, N);
+    vec3 F = FresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+
+    vec3 kS = F;
     vec3 kD = 1.0 - kS;
+    kD *= 1.0 - metallic;
+
     vec3 irradiance = texture(irradianceMap, -N).rgb;
     vec3 diffuse = irradiance * albedo;
-    vec3 ambient = (kD * diffuse) * ao;
+
+    const float MAX_REFLECTION_LOD = 4.0;
+    vec3 prefilteredColor = textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
+    vec2 envBRDF = texture(brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+    vec3 specular = prefilteredColor * (F * envBRDF.x + envBRDF.y);
+
+    vec3 ambient = (kD * diffuse + specular) * ao;
 
     outColor = vec4(Lo + ambient + emissive, 1.0);
 }
