@@ -17,6 +17,8 @@ include_directories(external)
 
 add_subdirectory(external/magic_enum)
 
+add_subdirectory(external/SDL)
+
 find_package(Vulkan)
 
 if(WIN32)
@@ -97,6 +99,9 @@ list(REMOVE_DUPLICATES SOURCE_FILES)
 # Create executable
 add_executable(pi_vulkan ${SOURCE_FILES})
 
+target_link_libraries(pi_vulkan PRIVATE SDL3::SDL3)
+target_include_directories(pi_vulkan PRIVATE external/SDL/include)
+
 target_include_directories(pi_vulkan SYSTEM PRIVATE external/glm)
 add_subdirectory(external/glm SYSTEM)
 
@@ -147,6 +152,8 @@ set(IMGUI_SOURCE_FILES
         ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
         ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
         ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
 )
 if(WIN32)
     list(APPEND IMGUI_SOURCE_FILES ${IMGUI_DIR}/backends/win/imgui_impl_glfw.cpp)
@@ -158,6 +165,8 @@ add_library(imgui STATIC ${IMGUI_SOURCE_FILES})
 
 target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_include_directories(imgui PUBLIC ${FREETYPE_DIR}/include)
+target_include_directories(imgui PUBLIC external/SDL/include)
+target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
 target_link_libraries(pi_vulkan PRIVATE imgui)
 target_link_libraries(pi_vulkan PRIVATE ${XINPUT_LIBRARY})
