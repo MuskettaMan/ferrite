@@ -1,19 +1,26 @@
-#include "win/sdl_app.hpp"
+#include "sdl_app.hpp"
 #include "SDL3/SDL.h"
 #include "SDL3/SDL_vulkan.h"
 #include "imgui/backends/imgui_impl_sdl3.h"
-#include "imgui/backends/imgui_impl_sdlrenderer3.h"
 #include "include.hpp"
 
 SDLApp::SDLApp(const CreateParameters& parameters) : Application(parameters)
 {
-    if(SDL_Init(SDL_INIT_VIDEO))
+    if(!SDL_Init(SDL_INIT_VIDEO))
     {
-        spdlog::error("Failed initializing SDL!");
+        spdlog::error("Failed initializing SDL: {0}", SDL_GetError());
         return;
     }
 
-    const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(0);
+    int32_t displayCount;
+    SDL_DisplayID* displayIds = SDL_GetDisplays(&displayCount);
+    const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(*displayIds);
+    if(dm == nullptr)
+    {
+        spdlog::error("Failed retrieving DisplayMode: {0}", SDL_GetError());
+        return;
+    }
+
 
     SDL_WindowFlags flags = SDL_WINDOW_VULKAN;
     if(parameters.isFullscreen)
@@ -28,8 +35,8 @@ SDLApp::SDLApp(const CreateParameters& parameters) : Application(parameters)
         return;
     }
 
-    _renderer = SDL_CreateRenderer(_window, "Vulkan renderer");
-    if(_window == nullptr)
+    _renderer = SDL_CreateRenderer(_window, nullptr);
+    if(_renderer == nullptr)
     {
         spdlog::error("Failed creating SDL renderer: {}", SDL_GetError());
         SDL_DestroyWindow(_window);
@@ -44,19 +51,13 @@ SDLApp::SDLApp(const CreateParameters& parameters) : Application(parameters)
     _initInfo.width = dm->w;
     _initInfo.height = dm->h;
     _initInfo.retrieveSurface = [this](vk::Instance instance) {
-        vk::SurfaceKHR surface;
-        if(!SDL_Vulkan_CreateSurface(_window, instance, nullptr, reinterpret_cast<VkSurfaceKHR*>(&surface)))
+        VkSurfaceKHR surface;
+        if(!SDL_Vulkan_CreateSurface(_window, instance, nullptr, &surface))
         {
             spdlog::error("Failed creating SDL vk::Surface: {}", SDL_GetError());
         }
-        return surface;
+        return vk::SurfaceKHR(surface);
     };
-
-    float xPos, yPos;
-    SDL_GetMouseState(&xPos, &yPos);
-    _mousePos.x = xPos;
-    _mousePos.y = yPos;
-    _lastMousePos = _mousePos;
 }
 
 SDLApp::~SDLApp()
@@ -89,55 +90,51 @@ void SDLApp::Run(std::function<void()> updateLoop)
     bool running = true;
     while(running)
     {
+        _inputManager.Update();
+
         SDL_Event event;
         while(SDL_PollEvent(&event))
         {
+
+            _inputManager.UpdateEvent(event);
             if(event.type == SDL_EventType::SDL_EVENT_QUIT)
                 running = false;
         }
 
-        float xPos, yPos;
-        SDL_GetMouseState(&xPos, &yPos);
-        _mousePos.x = xPos;
-        _mousePos.y = yPos;
-
         updateLoop();
-
-        _lastMousePos = _mousePos;
     }
 }
 
 void SDLApp::InitImGui()
 {
     ImGui_ImplSDL3_InitForVulkan(_window);
-    ImGui_ImplSDLRenderer3_Init(_renderer);
 }
 
 void SDLApp::NewImGuiFrame()
 {
     ImGui_ImplSDL3_NewFrame();
-    ImGui_ImplSDLRenderer3_NewFrame();
 }
 
 void SDLApp::ShutdownImGui()
 {
     ImGui_ImplSDL3_Shutdown();
-    ImGui_ImplSDLRenderer3_Shutdown();
 }
 
-glm::vec2 SDLApp::GetMousePosition()
+const class InputManager& SDLApp::GetInputManager() const
 {
-    return _mousePos;
+    return _inputManager;
 }
 
-glm::vec2 SDLApp::GetLastMousePosition()
+void SDLApp::SetMouseHidden(bool state)
 {
-    return _lastMousePos;
+    _mouseHidden = state;
+
+    //SDL_SetWindowMouseGrab(_window, _mouseHidden);
+    SDL_SetWindowRelativeMouseMode(_window, _mouseHidden);
+
+    if(_mouseHidden)
+        SDL_HideCursor();
+    else
+        SDL_ShowCursor();
 }
 
-bool SDLApp::KeyPressed(uint32_t keyCode)
-{
-    const uint8_t* state = SDL_GetKeyboardState(nullptr);
-
-    return state[keyCode];
-}

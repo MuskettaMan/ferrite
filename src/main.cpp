@@ -1,11 +1,6 @@
 #include "engine.hpp"
 
-#if defined(WINDOWS)
-#include "win/win_app.hpp"
-#include "win/sdl_app.hpp"
-#elif defined(LINUX)
-#include "linux/linux_app.hpp"
-#endif
+#include "sdl_app.hpp"
 
 #include <memory>
 
@@ -16,12 +11,7 @@ int main()
 {
     Application::CreateParameters parameters{ "Vulkan", true };
 
-#if defined(WINDOWS)
-//    g_app = std::make_shared<WinApp>(parameters);
-      g_app = std::make_shared<SDLApp>(parameters);
-#elif defined(LINUX)
-    g_app = std::make_shared<LinuxApp>(parameters);
-#endif
+    g_app = std::make_shared<SDLApp>(parameters);
 
     g_engine = std::make_unique<Engine>(g_app->GetInitInfo(), g_app);
 

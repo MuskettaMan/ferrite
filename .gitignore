@@ -30,6 +30,8 @@
 *.app
 
 **/.idea
+**/.vs
+**/out
 **/cmake-build-debug
 **/cmake-build-debug-raspberry-pi
 **/cmake-build-release

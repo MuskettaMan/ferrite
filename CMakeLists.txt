@@ -1,5 +1,8 @@
-cmake_minimum_required(VERSION 3.25.1)
+cmake_minimum_required(VERSION 3.19.4)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
+
+set(CMAKE_VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 set(NAME pi_vulkan)
 
@@ -17,6 +20,8 @@ include_directories(external)
 
 add_subdirectory(external/magic_enum)
 
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
 add_subdirectory(external/SDL)
 
 find_package(Vulkan)
@@ -80,18 +85,7 @@ if(WIN32)
 endif()
 
 file(GLOB_RECURSE SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/*.cpp)
-file(GLOB_RECURSE SOURCE_FILES_WIN32 ${PROJECT_SOURCE_DIR}/src/win/*.cpp)
-file(GLOB_RECURSE SOURCE_FILES_LINUX ${PROJECT_SOURCE_DIR}/src/linux/*.cpp)
 
-# Append platform-specific source files
-if(WIN32)
-    list(REMOVE_ITEM SOURCE_FILES ${SOURCE_FILES_LINUX})
-elseif(LINUX)
-    list(REMOVE_ITEM SOURCE_FILES ${SOURCE_FILES_WIN32})
-endif()
-
-message(STATUS ${SOURCE_FILES_WIN32})
-message(STATUS ${SOURCE_FILES_LINUX})
 message(STATUS ${SOURCE_FILES})
 
 list(REMOVE_DUPLICATES SOURCE_FILES)
@@ -99,7 +93,8 @@ list(REMOVE_DUPLICATES SOURCE_FILES)
 # Create executable
 add_executable(pi_vulkan ${SOURCE_FILES})
 
-target_link_libraries(pi_vulkan PRIVATE SDL3::SDL3)
+
+target_link_libraries(pi_vulkan PRIVATE SDL3::SDL3-static)
 target_include_directories(pi_vulkan PRIVATE external/SDL/include)
 
 target_include_directories(pi_vulkan SYSTEM PRIVATE external/glm)
@@ -152,7 +147,6 @@ set(IMGUI_SOURCE_FILES
         ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
         ${IMGUI_DIR}/misc/freetype/imgui_freetype.cpp
         ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
-        ${IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp
         ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
 )
 if(WIN32)

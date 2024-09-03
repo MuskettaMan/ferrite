@@ -31,6 +31,9 @@
 Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> application) :
     _brain(initInfo)
 {
+    auto path = std::filesystem::current_path();
+    spdlog::info("Current path: {}", path.string());
+
     ImGui::CreateContext();
     ImPlot::CreateContext();
     spdlog::info("Starting engine...");
@@ -42,7 +45,7 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     CreateDescriptorSetLayout();
     InitializeCameraUBODescriptors();
     InitializeHDRTarget();
-    LoadEnvironmentMap();
+    //LoadEnvironmentMap();
 
     _modelLoader = std::make_unique<ModelLoader>(_brain, _materialDescriptorSetLayout);
 
@@ -52,29 +55,29 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
     _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
     _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout, _cameraStructure);
-    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, std::move(uvSphere), _cameraStructure, _hdrTarget, _environmentMap);
+    //_skydomePipeline = std::make_unique<SkydomePipeline>(_brain, std::move(uvSphere), _cameraStructure, _hdrTarget, _environmentMap);
     _tonemappingPipeline = std::make_unique<TonemappingPipeline>(_brain, _hdrTarget, *_swapChain);
     _iblPipeline = std::make_unique<IBLPipeline>(_brain, _environmentMap);
     _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure, _iblPipeline->IrradianceMap(), _iblPipeline->PrefilterMap(), _iblPipeline->BRDFLUTMap());
 
-    SingleTimeCommands commandBufferIBL{ _brain };
-    _iblPipeline->RecordCommands(commandBufferIBL.CommandBuffer());
-    commandBufferIBL.Submit();
+    //SingleTimeCommands commandBufferIBL{ _brain };
+    //_iblPipeline->RecordCommands(commandBufferIBL.CommandBuffer());
+    //commandBufferIBL.Submit();
 
     CreateCommandBuffers();
     CreateSyncObjects();
 
     //_scene.model = _modelLoader->Load("assets/models/EnvironmentTest/EnvironmentTest.gltf");
-    _scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/DamagedHelmet.glb")));
-    _scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf")));
+    //_scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/DamagedHelmet.glb")));
+    //_scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf")));
 
     glm::vec3 scale{0.05f};
     glm::mat4 rotation{glm::quat(glm::vec3(0.0f, 90.0f, 0.0f))};
     glm::vec3 translate{-0.275f, 0.06f, -0.025f};
     glm::mat4 transform = glm::translate(glm::mat4{1.0f}, translate) * rotation * glm::scale(glm::mat4{1.0f}, scale);
 
-    _scene.gameObjects.emplace_back(transform, _scene.models[0]);
-    _scene.gameObjects.emplace_back(glm::mat4{1.0f}, _scene.models[1]);
+    //_scene.gameObjects.emplace_back(transform, _scene.models[0]);
+    //_scene.gameObjects.emplace_back(glm::mat4{1.0f}, _scene.models[1]);
 
     vk::Format format = _swapChain->GetFormat();
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
@@ -108,6 +111,12 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
     _lastFrameTime = std::chrono::high_resolution_clock::now();
 
+    glm::ivec2 mousePos;
+    _application->GetInputManager().GetMousePosition(mousePos.x, mousePos.y);
+    _lastMousePos = mousePos;
+
+    _application->SetMouseHidden(true);
+
     spdlog::info("Successfully initialized engine!");
 }
 
@@ -126,10 +135,11 @@ void Engine::Run()
         return;
     }
 
-    glm::vec2 mousePos = _application->GetMousePosition();
-    glm::vec2 lastMousePos = _application->GetLastMousePosition();
-    float yaw = (mousePos.x - lastMousePos.x) * -0.1f;
-    float pitch = (lastMousePos.y - mousePos.y) * 0.1f;
+    glm::ivec2 mousePos;
+    _application->GetInputManager().GetMousePosition(mousePos.x, mousePos.y);
+
+    float yaw = (mousePos.x - _lastMousePos.x) * -0.1f;
+    float pitch = (_lastMousePos.y - mousePos.y) * 0.1f;
     pitch = std::clamp(pitch, -89.0f, 89.0f);
 
     glm::quat yawQuat = glm::angleAxis(glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -144,13 +154,13 @@ void Engine::Run()
 
     const float speed = 0.0005f * deltaTimeMS;
     glm::vec3 movement{ 0.0f };
-    if(_application->KeyPressed('W'))
+    if(_application->GetInputManager().IsKeyHeld(InputManager::Key::W))
         movement += glm::vec3{0.0f, 0.0f, -1.0f};
-    else if(_application->KeyPressed('S'))
+    else if(_application->GetInputManager().IsKeyHeld(InputManager::Key::S))
         movement += glm::vec3{0.0f, 0.0f, 1.0f};
-    else if(_application->KeyPressed('A'))
+    else if(_application->GetInputManager().IsKeyHeld(InputManager::Key::A))
         movement += glm::vec3{-1.0f, 0.0f, 0.0f};
-    else if(_application->KeyPressed('D'))
+    else if(_application->GetInputManager().IsKeyHeld(InputManager::Key::D))
         movement += glm::vec3{1.0f, 0.0f, 0.0f};
 
     _scene.camera.position += _scene.camera.rotation * movement * deltaTimeMS * speed;
@@ -231,6 +241,7 @@ void Engine::Run()
     _currentFrame = (_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 
     _performanceTracker.Update();
+    _lastMousePos = mousePos;
 }
 
 Engine::~Engine()
@@ -315,7 +326,7 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
                                 _gBuffers->GBufferFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
-    _skydomePipeline->RecordCommands(commandBuffer, _currentFrame);
+    //_skydomePipeline->RecordCommands(commandBuffer, _currentFrame);
     _lightingPipeline->RecordCommands(commandBuffer, _currentFrame);
 
     util::TransitionImageLayout(commandBuffer, _hdrTarget.images, _hdrTarget.format, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
@@ -457,6 +468,9 @@ void Engine::LoadEnvironmentMap()
 {
     int32_t width, height, numChannels;
     float* data = stbi_loadf("assets/hdri/industrial_sunset_02_puresky_4k.hdr", &width, &height, &numChannels, 4);
+
+    if(data == nullptr)
+        throw std::runtime_error("Failed loading HDRI!");
 
     Texture texture{};
     texture.width = width;

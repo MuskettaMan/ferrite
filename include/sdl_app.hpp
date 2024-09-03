@@ -13,31 +13,22 @@ public:
     NON_MOVABLE(SDLApp);
 
     InitInfo GetInitInfo() override;
-
     glm::uvec2 DisplaySize() override;
-
     bool IsMinimized() override;
-
     void Run(std::function<void()> updateLoop) override;
-
     void InitImGui() override;
-
     void NewImGuiFrame() override;
-
     void ShutdownImGui() override;
+    void SetMouseHidden(bool state) override;
 
-    glm::vec2 GetMousePosition() override;
-
-    glm::vec2 GetLastMousePosition() override;
-
-    bool KeyPressed(uint32_t keyCode) override;
+    const InputManager& GetInputManager() const override;
 
 private:
     SDL_Window* _window;
     SDL_Renderer* _renderer;
 
     InitInfo _initInfo;
+    class InputManager _inputManager;
 
-    glm::vec2 _mousePos;
-    glm::vec2 _lastMousePos;
+    bool _mouseHidden = false;
 };
