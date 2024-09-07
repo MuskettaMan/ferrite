@@ -45,7 +45,7 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
     CreateDescriptorSetLayout();
     InitializeCameraUBODescriptors();
     InitializeHDRTarget();
-    //LoadEnvironmentMap();
+    LoadEnvironmentMap();
 
     _modelLoader = std::make_unique<ModelLoader>(_brain, _materialDescriptorSetLayout);
 
@@ -55,29 +55,28 @@ Engine::Engine(const InitInfo& initInfo, std::shared_ptr<Application> applicatio
 
     _gBuffers = std::make_unique<GBuffers>(_brain, _swapChain->GetImageSize());
     _geometryPipeline = std::make_unique<GeometryPipeline>(_brain, *_gBuffers, _materialDescriptorSetLayout, _cameraStructure);
-    //_skydomePipeline = std::make_unique<SkydomePipeline>(_brain, std::move(uvSphere), _cameraStructure, _hdrTarget, _environmentMap);
+    _skydomePipeline = std::make_unique<SkydomePipeline>(_brain, std::move(uvSphere), _cameraStructure, _hdrTarget, _environmentMap);
     _tonemappingPipeline = std::make_unique<TonemappingPipeline>(_brain, _hdrTarget, *_swapChain);
     _iblPipeline = std::make_unique<IBLPipeline>(_brain, _environmentMap);
     _lightingPipeline = std::make_unique<LightingPipeline>(_brain, *_gBuffers, _hdrTarget, _cameraStructure, _iblPipeline->IrradianceMap(), _iblPipeline->PrefilterMap(), _iblPipeline->BRDFLUTMap());
 
-    //SingleTimeCommands commandBufferIBL{ _brain };
-    //_iblPipeline->RecordCommands(commandBufferIBL.CommandBuffer());
-    //commandBufferIBL.Submit();
+    SingleTimeCommands commandBufferIBL{ _brain };
+    _iblPipeline->RecordCommands(commandBufferIBL.CommandBuffer());
+    commandBufferIBL.Submit();
 
     CreateCommandBuffers();
     CreateSyncObjects();
 
-    //_scene.model = _modelLoader->Load("assets/models/EnvironmentTest/EnvironmentTest.gltf");
-    //_scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/DamagedHelmet.glb")));
-    //_scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf")));
+    _scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/DamagedHelmet.glb")));
+    _scene.models.emplace_back(std::make_shared<ModelHandle>(_modelLoader->Load("assets/models/ABeautifulGame/ABeautifulGame.gltf")));
 
     glm::vec3 scale{0.05f};
     glm::mat4 rotation{glm::quat(glm::vec3(0.0f, 90.0f, 0.0f))};
     glm::vec3 translate{-0.275f, 0.06f, -0.025f};
     glm::mat4 transform = glm::translate(glm::mat4{1.0f}, translate) * rotation * glm::scale(glm::mat4{1.0f}, scale);
 
-    //_scene.gameObjects.emplace_back(transform, _scene.models[0]);
-    //_scene.gameObjects.emplace_back(glm::mat4{1.0f}, _scene.models[1]);
+    _scene.gameObjects.emplace_back(transform, _scene.models[0]);
+    _scene.gameObjects.emplace_back(glm::mat4{1.0f}, _scene.models[1]);
 
     vk::Format format = _swapChain->GetFormat();
     vk::PipelineRenderingCreateInfoKHR pipelineRenderingCreateInfoKhr{};
@@ -326,7 +325,7 @@ void Engine::RecordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_
                                 _gBuffers->GBufferFormat(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
                                 DEFERRED_ATTACHMENT_COUNT);
 
-    //_skydomePipeline->RecordCommands(commandBuffer, _currentFrame);
+    _skydomePipeline->RecordCommands(commandBuffer, _currentFrame);
     _lightingPipeline->RecordCommands(commandBuffer, _currentFrame);
 
     util::TransitionImageLayout(commandBuffer, _hdrTarget.images, _hdrTarget.format, vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);

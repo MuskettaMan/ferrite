@@ -4,14 +4,14 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 set(CMAKE_VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-set(NAME pi_vulkan)
+set(NAME ferrite)
 
 # Static linking only on windows.
 if(WIN32)
     set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++ -static-libgcc -static")
 endif()
 
-project(pi_vulkan)
+project(ferrite)
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -91,19 +91,19 @@ message(STATUS ${SOURCE_FILES})
 list(REMOVE_DUPLICATES SOURCE_FILES)
 
 # Create executable
-add_executable(pi_vulkan ${SOURCE_FILES})
+add_executable(ferrite ${SOURCE_FILES})
 
 
-target_link_libraries(pi_vulkan PRIVATE SDL3::SDL3-static)
-target_include_directories(pi_vulkan PRIVATE external/SDL/include)
+target_link_libraries(ferrite PRIVATE SDL3::SDL3-static)
+target_include_directories(ferrite PRIVATE external/SDL/include)
 
-target_include_directories(pi_vulkan SYSTEM PRIVATE external/glm)
+target_include_directories(ferrite SYSTEM PRIVATE external/glm)
 add_subdirectory(external/glm SYSTEM)
 
-target_link_libraries(pi_vulkan PRIVATE magic_enum::magic_enum)
-target_include_directories(pi_vulkan PUBLIC include)
-target_compile_options(pi_vulkan PRIVATE -fexceptions -frtti $<$<CONFIG:Debug>:-O0 -g> $<$<CONFIG:Release>:-O3>)
-target_link_options(pi_vulkan PRIVATE
+target_link_libraries(ferrite PRIVATE magic_enum::magic_enum)
+target_include_directories(ferrite PUBLIC include)
+target_compile_options(ferrite PRIVATE -fexceptions -frtti $<$<CONFIG:Debug>:-O0 -g> $<$<CONFIG:Release>:-O3>)
+target_link_options(ferrite PRIVATE
         $<$<CONFIG:Release>:-s>
 )
 
@@ -116,7 +116,7 @@ if(LINUX)
         message(FATAL_ERROR "XInput2 not found")
     endif()
 
-    target_link_libraries(pi_vulkan PRIVATE ${X11_LIBRARIES} ${XCB_LIBRARIES} ${X11_xcb_LIB} ${X11_X11_xcb_LIB} ${XINPUT_LIBRARY})
+    target_link_libraries(ferrite PRIVATE ${X11_LIBRARIES} ${XCB_LIBRARIES} ${X11_xcb_LIB} ${X11_X11_xcb_LIB} ${XINPUT_LIBRARY})
 endif()
 
 # END X11 XCB
@@ -127,8 +127,8 @@ set(FREETYPE_DIR external/freetype/freetype2)
 
 add_subdirectory(${FREETYPE_DIR})
 
-target_link_libraries(pi_vulkan PUBLIC ${FREETYPE_LIBRARY})
-target_include_directories(pi_vulkan SYSTEM PUBLIC ${FREETYPE_DIR}/include)
+target_link_libraries(ferrite PUBLIC ${FREETYPE_LIBRARY})
+target_include_directories(ferrite SYSTEM PUBLIC ${FREETYPE_DIR}/include)
 
 # END FREETYPE
 
@@ -162,9 +162,9 @@ target_include_directories(imgui PUBLIC ${FREETYPE_DIR}/include)
 target_include_directories(imgui PUBLIC external/SDL/include)
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
-target_link_libraries(pi_vulkan PRIVATE imgui)
-target_link_libraries(pi_vulkan PRIVATE ${XINPUT_LIBRARY})
-target_include_directories(pi_vulkan PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(ferrite PRIVATE imgui)
+target_link_libraries(ferrite PRIVATE ${XINPUT_LIBRARY})
+target_include_directories(ferrite PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 
 # END IMGUI
 
@@ -172,13 +172,13 @@ target_include_directories(pi_vulkan PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 include_directories("external/stb")
 
 add_subdirectory(external/spdlog)
-target_link_libraries(pi_vulkan PRIVATE spdlog::spdlog)
+target_link_libraries(ferrite PRIVATE spdlog::spdlog)
 
 add_subdirectory(external/fastgltf)
-target_link_libraries(pi_vulkan PRIVATE fastgltf::fastgltf)
+target_link_libraries(ferrite PRIVATE fastgltf::fastgltf)
 
 add_subdirectory(external/VulkanMemoryAllocator)
-target_link_libraries(pi_vulkan PRIVATE VulkanMemoryAllocator)
+target_link_libraries(ferrite PRIVATE VulkanMemoryAllocator)
 
 # BUILD TYPE SETTINGS
 
@@ -195,9 +195,9 @@ elseif(CMAKE_BUILD_TYPE MATCHES Release)
 endif()
 
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-    target_compile_definitions(pi_vulkan PRIVATE DEBUG_MODE)
+    target_compile_definitions(ferrite PRIVATE DEBUG_MODE)
 elseif(CMAKE_BUILD_TYPE MATCHES Release)
-    target_compile_definitions(pi_vulkan PRIVATE NDEBUG)
+    target_compile_definitions(ferrite PRIVATE NDEBUG)
 endif()
 
 # END BUILD TYPE SETTINGS
