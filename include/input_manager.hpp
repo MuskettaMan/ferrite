@@ -46,4 +46,6 @@ private:
     mutable std::unordered_map<MouseButton, bool> mouseButtonPressed;
     mutable std::unordered_map<MouseButton, bool> mouseButtonHeld;
     mutable std::unordered_map<MouseButton, bool> mouseButtonReleased;
+
+    float mouseX, mouseY;
 };
