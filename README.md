@@ -2,15 +2,15 @@
 This is a learning project to familiarize myself with the Vulkan graphics API. 
 
 ## Implemented features
-[x] Vulkan initialization
-[x] SDL3 window creation and input handling
-[x] CMake build system
-[x] Deferred rendering
-[x] PBR materials
-[x] IBL
-[x] HDR
-[x] Skydome
-[x] GLTF model loading
+- [x] Vulkan initialization
+- [x] SDL3 window creation and input handling
+- [x] CMake build system
+- [x] Deferred rendering
+- [x] PBR materials
+- [x] IBL
+- [x] HDR
+- [x] Skydome
+- [x] GLTF model loading
 
 
 ## Learning goals 
