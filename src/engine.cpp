@@ -164,6 +164,9 @@ void Engine::Run()
 
     _scene.camera.position += _scene.camera.rotation * movement * deltaTimeMS * speed;
 
+    if (_application->GetInputManager().IsKeyPressed(InputManager::Key::Escape))
+        Quit();
+
     CameraUBO cameraUBO = CalculateCamera(_scene.camera);
     std::memcpy(_cameraStructure.mappedPtrs[_currentFrame], &cameraUBO, sizeof(CameraUBO));
 

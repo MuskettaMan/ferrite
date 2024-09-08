@@ -85,7 +85,7 @@ bool SDLApp::IsMinimized()
     return flags & SDL_WINDOW_MINIMIZED;
 }
 
-void SDLApp::Run(std::function<void()> updateLoop)
+void SDLApp::Run(std::function<bool()> updateLoop)
 {
     bool running = true;
     while(running)
@@ -95,13 +95,13 @@ void SDLApp::Run(std::function<void()> updateLoop)
         SDL_Event event;
         while(SDL_PollEvent(&event))
         {
-
             _inputManager.UpdateEvent(event);
             if(event.type == SDL_EventType::SDL_EVENT_QUIT)
                 running = false;
         }
 
-        updateLoop();
+        if(updateLoop())
+            running = false;
     }
 }
 

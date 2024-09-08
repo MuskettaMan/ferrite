@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19.4)
+cmake_minimum_required(VERSION 3.22.1)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
 set(CMAKE_VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -6,16 +6,10 @@ set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 set(NAME ferrite)
 
-# Static linking only on windows.
-if(WIN32)
-    set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++ -static-libgcc -static")
-endif()
-
 project(ferrite)
 
 set(CMAKE_CXX_STANDARD 20)
 
-#include_directories(external/vulkan)
 include_directories(external)
 
 add_subdirectory(external/magic_enum)
@@ -36,9 +30,8 @@ if(WIN32)
             message("WIN32: Using bundled Vulkan library version")
         endif()
     endif()
-    set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -DVK_USE_PLATFORM_WIN32_KHR)
 elseif(LINUX)
-    add_definitions(-DLINUX)
+    add_definitions(-DLINUX) 
     if(NOT Vulkan_FOUND)
         find_library(Vulkan_LIBRARY NAMES vulkan HINTS "$ENV{VULKAN_SDK}/lib" "${CMAKE_SOURCE_DIR}/libs/vulkan" REQUIRED)
         if(Vulkan_LIBRARY)
@@ -49,23 +42,6 @@ elseif(LINUX)
         include_directories(${Vulkan_INCLUDE_DIRS})
     endif()
 
-    find_package(X11 REQUIRED)
-    if(X11_FOUND)
-        message(STATUS "Found x11")
-        include_directories(${X11_INCLUDE_DIRS})
-        #link_libraries(${X11_LIBRARIES})
-    endif()
-    if(NOT X11_xcb_FOUND)
-        message(FATAL_ERROR "X11-XCB not found")
-    endif()
-
-    find_package(xcb REQUIRED)
-    if(xcb_FOUND)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_USE_PLATFORM_XCB_KHR")
-        message(STATUS "Found xcb")
-        include_directories(${XCB_INCLUDE_DIRS})
-        #link_libraries(${XCB_LIBRARIES})
-    endif ()
 
 endif()
 
@@ -103,23 +79,18 @@ add_subdirectory(external/glm SYSTEM)
 target_link_libraries(ferrite PRIVATE magic_enum::magic_enum)
 target_include_directories(ferrite PUBLIC include)
 target_compile_options(ferrite PRIVATE -fexceptions -frtti $<$<CONFIG:Debug>:-O0 -g> $<$<CONFIG:Release>:-O3>)
+
+if(WIN32)
+	target_compile_options(ferrite PRIVATE -DVK_USE_PLATFORM_WIN32_KHR)
+elseif(LINUX)
+    target_compile_options(ferrite PRIVATE -DVK_USE_PLATFORM_XLIB_KHR)
+endif()
+
+target_compile_options(ferrite PUBLIC -DNOMINMAX)
+
 target_link_options(ferrite PRIVATE
         $<$<CONFIG:Release>:-s>
 )
-
-# X11 XCB
-if(LINUX)
-    find_library(XINPUT_LIBRARY NAMES Xi)
-    find_path(XINPUT_INCLUDE_DIR NAMES X11/extensions/XInput2.h)
-
-    if(NOT XINPUT_LIBRARY OR NOT XINPUT_INCLUDE_DIR)
-        message(FATAL_ERROR "XInput2 not found")
-    endif()
-
-    target_link_libraries(ferrite PRIVATE ${X11_LIBRARIES} ${XCB_LIBRARIES} ${X11_xcb_LIB} ${X11_X11_xcb_LIB} ${XINPUT_LIBRARY})
-endif()
-
-# END X11 XCB
 
 # FREE TYPE
 
@@ -149,11 +120,6 @@ set(IMGUI_SOURCE_FILES
         ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
         ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
 )
-if(WIN32)
-    list(APPEND IMGUI_SOURCE_FILES ${IMGUI_DIR}/backends/win/imgui_impl_glfw.cpp)
-elseif(LINUX)
-    list(APPEND IMGUI_SOURCE_FILES ${IMGUI_DIR}/backends/linux/imgui_impl_xlib.cpp)
-endif()
 
 add_library(imgui STATIC ${IMGUI_SOURCE_FILES})
 
@@ -184,14 +150,6 @@ target_link_libraries(ferrite PRIVATE VulkanMemoryAllocator)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
-endif()
-
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-    message("Debug build.")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
-elseif(CMAKE_BUILD_TYPE MATCHES Release)
-    message("Release build.")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 endif()
 
 if(CMAKE_BUILD_TYPE MATCHES Debug)

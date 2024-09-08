@@ -2,6 +2,7 @@
 #include "vulkan_helper.hpp"
 #include "shaders/shader_loader.hpp"
 #include "single_time_commands.hpp"
+#include "stopwatch.hpp"
 
 IBLPipeline::IBLPipeline(const VulkanBrain& brain, const TextureHandle& environmentMap) :
     _brain(brain),
@@ -11,9 +12,9 @@ IBLPipeline::IBLPipeline(const VulkanBrain& brain, const TextureHandle& environm
     _irradianceMap.format = vk::Format::eR16G16B16A16Sfloat;
     _irradianceMap.mipLevels = 1;
 
-    _prefilterMap.size = 512;
+    _prefilterMap.size = 128;
     _prefilterMap.format = vk::Format::eR16G16B16A16Sfloat;
-    _prefilterMap.mipLevels = fmin(floor(log2(_prefilterMap.size)), 5.0);
+    _prefilterMap.mipLevels = fmin(floor(log2(_prefilterMap.size)), 3.0);
 
     CreateIrradianceCubemap();
     CreatePrefilterCubemap();
@@ -109,6 +110,7 @@ void IBLPipeline::RecordCommands(vk::CommandBuffer commandBuffer)
             finalColorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eLoad;
 
             uint32_t size = static_cast<uint32_t>(_prefilterMap.size >> i);
+            spdlog::info(size);
 
             vk::RenderingInfoKHR renderingInfo{};
             renderingInfo.renderArea.extent = vk::Extent2D{ size, size };

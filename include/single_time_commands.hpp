@@ -31,6 +31,7 @@ public:
 private:
     const VulkanBrain& _brain;
     vk::CommandBuffer _commandBuffer;
+    vk::Fence _fence;
     bool _submitted{ false };
 
     std::vector<vk::Buffer> _stagingBuffers;

@@ -17,7 +17,7 @@ int main()
 
     try
     {
-        g_app->Run([]() { g_engine->Run(); });
+        g_app->Run([]() { g_engine->Run(); return g_engine->ShouldQuit(); });
     }
     catch (const std::exception& e)
     {

@@ -26,7 +26,7 @@ public:
     NON_MOVABLE(Application);
 
     virtual ~Application();
-    virtual void Run(std::function<void()> updateLoop) = 0;
+    virtual void Run(std::function<bool()> updateLoop) = 0;
     virtual void InitImGui() = 0;
     virtual void NewImGuiFrame() = 0;
     virtual void ShutdownImGui() = 0;

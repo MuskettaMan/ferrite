@@ -29,6 +29,8 @@ public:
     NON_MOVABLE(Engine);
 
     void Run();
+    bool ShouldQuit() const { return _shouldQuit; };
+    void Quit() { _shouldQuit = true; };
 
 private:
     const VulkanBrain _brain;
@@ -64,6 +66,8 @@ private:
     std::chrono::time_point<std::chrono::high_resolution_clock> _lastFrameTime;
 
     PerformanceTracker _performanceTracker;
+
+    bool _shouldQuit = false;
 
     void CreateDescriptorSetLayout();
     void CreateCommandBuffers();
